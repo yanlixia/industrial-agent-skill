@@ -11,7 +11,7 @@
 #
 # What it does:
 #   0. when piped (no local repo), clones the repo to a temp cache first
-#   1. installs the skill (SKILL.md + references + scaffold) into
+#   1. installs the skill (SKILL.md + references + scaffold + generator tools) into
 #      ~/.agents/skills/industrial-agent-builder/  (the cross-CLI convention dir)
 #   2. links it for Claude Code at ~/.claude/skills/industrial-agent-builder
 #      (skip with SKIP_CLAUDE_LINK=1)
@@ -50,6 +50,8 @@ say "installing skill to ${TARGET}"
 mkdir -p "${TARGET_BASE}"
 rm -rf "${TARGET}"
 cp -R "${REPO_DIR}/skill/." "${TARGET}/"
+mkdir -p "${TARGET}/tools"
+cp -R "${REPO_DIR}/tools/." "${TARGET}/tools/"
 
 if [ "${SKIP_CLAUDE_LINK:-0}" != "1" ]; then
   if [ -d "${HOME}/.claude/skills" ]; then
@@ -76,9 +78,11 @@ fi
 
 say "verifying toolchain (self-tests)"
 python3 "${REPO_DIR}/tools/state_roundtrip.py" >/dev/null || die "state_roundtrip self-test failed"
+python3 "${TARGET}/tools/scaffold.py" --help >/dev/null || die "scaffold generator self-test failed"
 say "self-tests passed"
 
 say "done. usage:"
 echo "  - in your agent CLI: mention '工业智能体' / 'industrial agent' — the skill triggers"
 echo "  - tools now on PATH (after reload): check_marker_contract  validate_reply  state_roundtrip  remote_probe"
-echo "  - scaffold a new agent repo: copy ${TARGET}/assets/scaffold and follow its README"
+echo "  - scaffold a single expert: python3 ${TARGET}/tools/scaffold.py --mode single --domain <domain> --title '<title>' --target ./my-expert"
+echo "  - scaffold an expert team:  python3 ${TARGET}/tools/scaffold.py --mode team --domain <domain> --title '<title>' --roles role1,role2 --target ./my-team"

@@ -1,0 +1,11 @@
+{
+  "validator": "scripts/validate_reply.py",
+  "reply_globs": [
+    "**/turn.py",
+    "**/run.py",
+    "**/render_reply.py",
+    "**/runtime.py",
+    "**/*reply*.py",
+    "**/*relay*.py"
+  ]
+}

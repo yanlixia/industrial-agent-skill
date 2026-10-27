@@ -1,65 +1,108 @@
-# 四类实证坑：完整因果链与规避
+# 已实证坑与规避
 
-来源：DeepWorks Agent Teams + 设备运维 v3 链路，2026-10 实测（DW-OBS-143~147，证据见上游仓库 ledger）。
-每条按「症状 → 因果链 → 规避」组织；规避分**知识**（写进规则）、**机器**（CI 强制）、**流程**（测试要求）三层——只靠知识必然复发。
+来源：DeepWorks Agent Teams、设备运维 v3（DW-OBS-143~147）和 2026-10 的 test 会话。原则：坑要落到**机器门禁**，不要只写在提示词里。
 
-## 坑 1：跨轮状态藏在会被改写的回复文本里（DW-OBS-143/145/146）
+## 共同坑
 
-**症状**：查询轮成功返回工单表，但每个选择轮稳定 escalate，且失败文案完全相同、无根因。
+### 1. 把回复文本当状态库
 
-**因果链（三层叠加，每层单看都「没错」）**：
-1. 查询轮 wrap 环节用**入参** root（查询轮为空）而非 ensure 后的真实 root → 用户可见 marker 为空
-2. 真实 root 只编码在回复尾部的隐形 `mes_state:UUID:payload` marker 里；验收器 UUID 禁令只豁免了 frozen marker → 草稿保留它必失败 → LLM 只能删掉它才过验（与「逐字复制 marker」指令自相矛盾）
-3. 下一轮从上下文扫 marker 扫不到 → root 为空 → 状态机失败
-
-**放大器**：平台聊天任务的跨轮上下文靠 task.input 内嵌历史消息（单条 3000 字截断）；LLM 复述 672 字符 base64+zlib 实测抄坏 2 处单字符。回复文本不是可靠状态通道。
+**现象**：查询轮成功，下一轮选择却稳定失败，原因只是 marker 被模型改写或删掉。
 
 **规避**：
-- 知识：权威状态放 issue description/artifact（平台原生、不过 LLM 手）；marker 只做加速通道
-- 机器：`validate_reply.py` 豁免一切续链 marker 命名空间；`check_marker_contract.py` 扫回层 emit 点强制一致
-- 流程：往返契约测试（R2 损坏回退必须静默成功）——`state_roundtrip.py`
 
-**写新 agent 前自问**：这个状态如果从回复里被删掉，下一轮还能从 issue 恢复吗？不能，就不能只靠 marker。
+- 权威状态放 issue description、child issue、comment、artifact。
+- 回复 marker 只做加速；损坏或缺失时静默从 issue 树恢复。
+- 用 `state_roundtrip.py` 测“产出 -> 渲染 -> 验收 -> 下一轮恢复”的整条链。
 
-## 坑 2：规则在组合层自相矛盾（DW-OBS-143 的普化）
+### 2. 规则在组合后互相打架
 
-**症状**：UUID 禁令、「逐字复制 marker」、验收强制三条规则各自正确，组合后让 LLM 只能二选一违规。
-
-**因果链**：规则散落在不同文件（validator 一处、agents.md 一处、架构一处），没有任何机制检查它们相遇时的语义。修 bug 的人修掉看得见的实例（豁免 frozen marker），漏掉同类（relay 内层的 mes_state）。
+**现象**：验收器禁止 UUID，但续链 marker 自身含 UUID；模型为了过验收只能删 marker。
 
 **规避**：
-- 机器：emit↔exempt 一致性 lint 进 CI，新增 marker 命名空间忘豁免即红
-- 流程：验收器测试必须含「带全部续链 marker 的合法草稿通过」用例
-- 知识：任何「要求逐字复制」与任何「禁止内容」的规则共存时，必须显式声明豁免关系
 
-## 坑 3：组件测试全绿、链路必死（往返缺失）
+- 所有进入用户回复的 marker 必须登记在 `validate_reply.py` 的续链豁免清单。
+- `check_marker_contract.py` 在 CI 强制 emit/exempt 一致。
+- 新增 marker 命名空间时，同时改验收器和测试。
 
-**症状**：374 个组件级测试全绿；真实环境选择轮 100% 失败。
+### 3. 组件测试全绿，真实链路断
 
-**因果链**：validator 测 validator、turn 测 turn，每个都「对」；没有任何测试把「查询轮产出 → 草稿 → 验收 → 下一轮恢复」当一条链跑。矛盾恰好活在层与层的接缝上。
-
-**规避**：
-- 流程：往返契约测试为发布门（`state_roundtrip.py` 的 R1~R3）
-- 知识：单向测试（只测产出或只测恢复）在这里等于没测
-
-## 坑 4：子进程错误打到父进程不读的通道（DW-OBS-144）
-
-**症状**：所有续接轮的 escalate 摘要是同一句兜底文案，分不清 root 为空、CLI 缺失还是 issue 不存在——排查成本翻数倍。
-
-**因果链**：子脚本失败时把 `{"status":"error","message":...}` 打到 stdout（stderr 空、exit 1）；父进程只在 rc≠0 时读 stderr。真实错误被 generic 文案覆盖。
+**现象**：validator 测 validator、turn 测 turn，没有任何测试跨过层与层之间的接缝。
 
 **规避**：
-- 机器/流程：子进程失败路径测试必须断言**父进程拿到的文本含子进程真实 message**；父进程实现上 stderr 优先、为空则解析 stdout 错误 JSON
-- 知识：「兜底文案吞根因」在排查期等价于把所有故障折叠成一种表象
 
-## 附：延迟乘数（为什么小时级 → 分钟级）
+- 生成物必须带 smoke、回复验收、幂等、子进程错误和团队计划测试。
+- 发布前必须跑一条完整的 mock 链路，再到 test 环境新会话跑真实链路。
 
-| 乘数 | 机制 | 量级 |
-|---|---|---|
-| M1 任务扇出 | 一个用户轮次 = 团长 + 1~2 成员 task，各自冷沙箱全量读上下文 | ×2~4 |
-| M2 LLM 游走 | 探测不存在的 CLI、翻目录、猜端点 | ×2~5 |
-| M3 冷启动+物化 | 每 task 重新拉 skill、装依赖 | 每 task +10~40s |
-| M4 逐轮推理等待 | 每个轮询间隔都烧一次推理 | ×2~3 |
-| M5 失败重试 | 无幂等键 → 重复建单重复派发 | 不可控 |
+### 4. 父进程读不到子进程真实错误
 
-结构性消灭（单执行体 + 脚本即专家 + 切片轮询 + 幂等键）后，实测每轮 41~96s。模型出口限流（429）是唯一剩余系统风险——选型时绑定稳定出口，第一天实测 T_infer。
+**现象**：所有失败都只剩一句“处理失败”，无法区分 CLI 缺失、权限拒绝和输入错误。
+
+**规避**：
+
+- 子进程 stderr 优先；为空则解析 stdout 的 error/message JSON。
+- 原始错误写入 issue/audit，用户回复只给可执行摘要。
+- 测试必须断言父进程拿到的文本包含子进程真实 message。
+
+### 5. 本地全绿，线上 Skill 却 import 失败
+
+**现象**：仓库根目录测试全部通过，发布后入口直接 `ModuleNotFoundError: runtime`。
+
+**原因**：本地从仓库根运行，能看到 `scripts/runtime.py`；平台线上只挂载单个 Skill 目录。
+
+**规避**：
+
+- 每个 Skill 的 `scripts/` 自带 `runtime.py` / `validate_reply.py`。
+- `doctor.py` 把 Skill 单独复制到临时目录再执行。
+- 禁止用“仓库根目录存在”当作运行前提。
+
+## 专家团额外坑
+
+### 6. 团长亲自干活或成员继续派发
+
+**规避**：团长只路由、派发、汇总；成员只执行本角色，禁止创建 child。
+
+### 7. 重复事件重复建 child / 重复回写
+
+**规避**：child 使用 `{root}|{role}|{business_id}|{operation}` 幂等键；派发前检查 existing child 和完成状态。
+
+### 8. 只发“子任务已创建”，没有最终综合结果
+
+**规避**：团长必须读取 child 的 `member-result.json` artifact，按角色汇总事实后回复；不能把“已转交”当完成。
+
+### 9. 只更新 Skill，不更新 Agent / squad / runtime
+
+**规避**：发布清单把团长 instructions、成员 instructions、所有 Skill、squad 绑定和 runtime 绑定列为同一批发布面。
+
+### 10. 成员把 child 标题当用户请求
+
+**现象**：成员收到了 child issue，但只看到 `ISS-12: [diagnosis] diagnosis 任务`，真实业务输入在 description 的 JSON 里。
+
+**规避**：成员入口解析 child 输入 JSON 的 `request`，不要取 `task.input` 第一行；测试必须断言成员消费了真实载荷。
+
+### 11. manifest 写了 ID，线上却读不到
+
+**现象**：仓库 `deepworks.manifest.json` 已填 ID，团长线上仍报缺少成员 Agent ID。
+
+**原因**：manifest 是发布索引，通常不随 Skill 挂载。
+
+**规避**：把运行时 ID 写进团长 Skill 的 `config/team.json`，或用 `DEEPWORKS_AGENT_ID_<ROLE>` 环境变量；两者都缺时必须结构化失败。
+
+### 12. 把 child 的输入 JSON 当成成员结果
+
+**现象**：child 描述天然包含团长写入的 `{"request": ...}`。如果结果解析器扫描整段描述，就会在没有成员产物时误判成功。
+
+**规避**：
+
+- 只认 `artifacts/member-result.json`，或带 `member_result_key` 的 agent comment。
+- 描述里的输入 JSON、平台自动摘要 comment 都不是机器结果。
+- `done` 但读不到结构化结果必须按失败处理。
+
+### 13. 机器结果直接发成用户可见 JSON comment
+
+**现象**：成员 `run.py` 写了一条 JSON comment，平台完成 task 又合成一条可见 comment。
+
+**规避**：机器结果写 artifact，成员最终回复只写一句中文完成提示。这样既保留证据链，也不把裸 JSON 暴露给用户。
+
+## 延迟经验
+
+真实链路的主要乘数是任务扇出、冷启动、LLM 游走和无效轮询。先做结构优化：一次只派一个 ready child、脚本切片轮询、payload 瘦身、幂等收敛；不要先删产品定义的专家角色。

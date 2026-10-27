@@ -1,84 +1,116 @@
 # industrial-agent-skill
 
-**通用工业智能体构建工具包**：一套经过真实工业链路验证（DeepWorks Agent Teams + 设备运维 v3）的单执行体方法论、脚手架和机器强制工具，让新工业智能体从第一天就满足**每轮会话 P95 ≤120s**，并且不重蹈四类已实证的断链 bug。
+**DeepWorks AI 同事工作区的专家/专家团构建 Skill。**
 
-一条命令安装：
+目标不是“写一段提示词”，而是让一个专家或一支专家团在 DeepWorks 里可生成、可运行、可验收、可发布。
+
+## 两种产品形态
+
+| 产品形态 | 生成什么 | 运行边界 |
+|---|---|---|
+| 单专家 | 一个 Agent + 一个主 Skill | 不建团、不派发、不创建 child issue |
+| 专家团 | 团长 Agent + 成员 Agent + squad | 团长只编排；成员只执行本角色；默认串行派发 ready child |
+
+产品定了专家团，就生成真实团长和成员 Agent，不为了性能偷偷降级成单专家。确定性内联只作为产品明确接受的优化，不是默认架构。
+
+## 快速开始
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yanlixia/industrial-agent-skill/main/install.sh | bash
+git clone https://github.com/yanlixia/industrial-agent-skill.git
+cd industrial-agent-skill
+bash install.sh
 ```
 
-或克隆后 `bash install.sh`。纯 Python 标准库 + bash，零依赖、零运行时安装。
+安装后 Skill 位于 `~/.agents/skills/industrial-agent-builder/`。
 
-## 这解决什么问题
+### 单专家
 
-工业场景的「专家团」常见形态是三四个 LLM agent 互相派发，单轮延迟动辄数分钟到一小时，且跨轮状态靠聊天文本传递——v3 设备运维链的实测把它拆成了五个延迟乘数和四类断链缺陷（详见 [docs/PITFALLS.md](docs/PITFALLS.md)）。本仓库把这些教训固化成三层：
+```bash
+python3 ~/.agents/skills/industrial-agent-builder/tools/scaffold.py \
+  --mode single --domain energy --title 能源诊断专家 --target ./energy-expert
+```
 
-| 层 | 内容 | 防什么 |
-|---|---|---|
-| **方法论**（skill/）| 决策门（大多数团该降级）、三档运行时、十二条硬规则、延迟预算表 | 小时级延迟（M1~M5 乘数） |
-| **脚手架**（scaffold/）| agents.md/soul.md/SKILL.md 模板 + 已验证的 validate_reply.py | 从散文重写引入的 bug |
-| **机器强制**（tools/）| marker 契约 lint、状态往返契约 harness、回放探针 | 「组件测试全绿、链路 100% 断」 |
+### 专家团
+
+```bash
+python3 ~/.agents/skills/industrial-agent-builder/tools/scaffold.py \
+  --mode team --domain energy --title 能源诊断专家团 \
+  --roles diagnosis,maintenance,monitor \
+  --leader-agent-id <leader-id> \
+  --agent-ids diagnosis=<id>,maintenance=<id>,monitor=<id> \
+  --squad-id <squad-id> --target ./energy-team
+```
+
+Agent/squad 还没创建时可以先省略 ID，生成后在 `skills/<domain>-orchestrate/config/team.json` 补齐。
+
+生成后先跑本地门禁：
+
+```bash
+cd energy-team
+python3 scripts/doctor.py
+python3 -m unittest discover -s tests -v
+python3 scripts/doctor.py --release   # 填完真实 ID 后执行
+```
+
+然后在 DeepWorks test 环境新建会话验收。旧会话或单测全绿都不算发布完成。
+
+## 生成物
+
+- `entry/`：单专家或团长 instructions 与 soul。
+- `skills/`：入口契约、`turn.py`，以及随 Skill 一起发布的 `runtime.py` / `validate_reply.py`。
+- `experts/<role>/`：专家团成员的 Agent、soul 和 `run.py`。
+- `contracts/`：状态、结果、派发、marker 和副作用基数。
+- `tests/`：smoke、团队串行计划、幂等、子进程错误、回复验收。
+- `scripts/`：`doctor.py`、`runtime.py`、`validate_reply.py`、`check_marker_contract.py`。
+- `skills/<domain>-orchestrate/config/team.json`：线上 Skill 真正读取的成员 Agent ID / squad ID。
+- `deepworks.manifest.json`：形态、领域、角色、Skill、squad 绑定和 Agent ID 的发布索引。
+
+发布到 DeepWorks 时通常只挂载 Skill 目录，所以每个 Skill 必须自包含；生成器已经复制 runtime 与回复验收脚本。`deepworks.manifest.json` 是仓库侧发布索引，不要指望线上 worker 能读到它。
+
+生成物是**可跑通的骨架**。领域 provider、真实 Agent ID、squad 绑定和业务事实仍需实现。
+
+## 共同铁律
+
+1. **先定产品形态，再定实现。**
+2. **控制流在脚本，LLM 只做意图兜底、事实抽取和措辞。**
+3. **权威状态在 issue/artifact，回复 marker 只是加速通道。**
+4. **每个副作用有幂等键，重复事件收敛为同一结果。**
+5. **用户回复必须过 `validate_reply.py`，不允许裸 JSON、命令、路径、UUID。**
+6. **专家团团长只派发和汇总；成员只执行本角色，不继续派发。**
+7. **Skill 目录必须自包含；不能依赖仓库根目录的脚本。**
+
+## 质量门
+
+```bash
+python3 tools/scaffold.py --help              # 生成器可用
+python3 tools/state_roundtrip.py              # 状态往返自检
+python3 tools/check_marker_contract.py .      # marker emit/exempt 一致
+python3 -m unittest discover -s tests -v      # 生成物验收
+```
+
+生成物门禁里的 `doctor.py` 会把入口 Skill 单独复制到临时目录再执行，专门检查线上“只挂载 Skill 目录”的布局。
+
+正式发布还必须在 test 环境记录：事件时间线、dispatch/artifact/API 次数、最终用户消息、每轮 `timings` 和 P95。
 
 ## 仓库结构
 
 ```text
-skill/                     # 安装进 agent CLI 的技能本体
-  SKILL.md                 # 入口：工作流五步 + 判断红线
-  references/              # architecture / decision-gates / file-templates
-  assets/scaffold/         # 新智能体仓库骨架（含状态通道铁律 README）
-tools/                     # 独立 CI/命令行工具（不依赖 skill 安装）
-  check_marker_contract.py # CI 门：emit↔exempt 一致性（防 UUID 禁令打中自家 marker）
-  validate_reply.py        # 回复验收门（含续链 marker 豁免）
-  state_roundtrip.py       # 往返契约 harness：R1 正常 / R2 marker 损坏回退 / R3 禁令仍生效
-  remote_probe.py          # 远端回放探针：分段计时 + 结构化 JSON + 台账行
-docs/
-  PITFALLS.md              # 四类实证坑的完整因果链与规避
-examples/                  # （占位）首个真实生成物将放在这里
-install.sh
+skill/SKILL.md                  # Skill 入口：判形态 -> 生成 -> 实现 -> 验收
+skill/references/               # 决策、架构、DeepWorks、文件契约、清单
+skill/assets/scaffold/templates # single / team / common 模板
+tools/scaffold.py               # 单专家/专家团生成器
+tools/runtime.py                # 生成物共用的 DeepWorks runtime
+tools/validate_reply.py         # 回复验收门
+tools/check_marker_contract.py  # marker 一致性 lint
+tools/state_roundtrip.py        # 状态往返契约 harness
+tools/remote_probe.py           # test 环境回放探针
+docs/PITFALLS.md                # 已实证坑与规避
+tests/                          # 本 Skill 的生成物验收
 ```
 
-## 快速开始（三步）
+## 适用边界
 
-**1. 过决策门**（最重要的一步，大多数「专家团」在这一步被降级成 workflow 或单专家）：
+适用于 DeepWorks AI 同事工作区中的专家、专家团和 Agent Teams squad。
+不适用于普通聊天机器人、与 issue/artifact 无关的独立系统。`deepsense-agent-kit` 的 `@deepsense + CLI` 发包是另一层，不与本 Skill 的 Agent Teams 形态混用。
 
-读 `skill/references/decision-gates.md`，回答：流程是否完全确定？判断点是否跨 ≥2 个领域？有没有人工门禁？——能降级就降级，这是最大的一笔延迟收益。
-
-**2. 生成骨架**：
-
-```bash
-cp -R ~/.agents/skills/industrial-agent-builder/assets/scaffold my-agent && cd my-agent
-# 全局替换 DOMAIN -> 你的领域（如 energy），补全事件表/幂等键/输出契约
-```
-
-**3. 把机器强制接进 CI**：
-
-```bash
-python3 tools/check_marker_contract.py .            # emit↔exempt 一致性
-python3 tools/state_roundtrip.py                    # harness 自检（接入你的管线见文件头）
-cp tools/check_marker_contract.py my-agent/scripts/ # 或放仓库内
-```
-
-## 核心铁律（为什么是这四条）
-
-1. **状态权威源 = issue description / artifact，不是回复文本。** 回复会被 LLM 抄错（实测 672 字符 marker 抄坏 2 处）、被验收器删、被平台截断（单条 3000 字）。marker 只做加速通道，损坏时静默回退。
-2. **凡写进用户回复的隐形 marker，必须在验收器豁免清单。** 由 `check_marker_contract.py` 在 CI 强制——.UUID 禁令和「逐字复制 marker」两条规则天然矛盾，靠人记必然漏。
-3. **测试必须含往返契约。** v3 实证：374 个组件级测试全绿，跨轮链路 100% 断。`state_roundtrip.py` 把「产出→渲染→验收→恢复」整条链当一个测试走。
-4. **子进程错误必须落在父进程读的通道。** 兜底文案吞根因 = 所有故障折叠成同一句 escalate，排查期等于盲人。
-
-完整十二条见 `skill/references/architecture.md`。
-
-## 环境前提
-
-- 任何支持 `skills/` 目录约定的 agent CLI（Claude Code / Codex / CodeBuddy 等）
-- Python 3.8+（工具全部标准库）
-- `remote_probe.py` 需要能访问 DeepWorks 桌面端调试端口（token 自动桥接，路径参数化）；不用 DeepWorks 时探针可整体不用
-
-## 已验证与未验证（诚实声明）
-
-- **已验证**：方法论与数字来自设备运维 v3 真实链路（2026-10 实测每轮 41~96s < 120s 目标；四类坑均有 DW-OBS 编号证据链）；工具三向测试（v3 修复后 ok / 模拟回退状态红 / 自身自检过）
-- **未验证**：跨部门场景（单轮多人工门禁、超长报告生成）未经过第二个团队使用。首批使用者请把摩擦反馈回来，这是版本演进的输入
-
-## License
-
-MIT
+当前交付以本地 smoke、生成物 doctor 和 v3 经验回灌为已验证范围；真实 DeepWorks 派发必须在 test 环境新建会话复核。

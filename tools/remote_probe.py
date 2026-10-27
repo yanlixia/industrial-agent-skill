@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Remote verification probe for the DeepWorks Agent Teams test environment (LAB-021).
+"""Remote verification probe for DeepWorks experts and expert teams.
 
 Sends ONE message to an agent chat session (new session, or an existing one via
 --session for selection/continuation rounds), polls the resulting task until a
@@ -11,8 +11,7 @@ terminal status, and prints a structured JSON result:
   otherwise);
 - terminal status, failure_code, last observed status;
 - session id / task id;
-- hidden continuation markers (squad_root_issue_id non-empty check per
-  DW-OBS-143, mes_state presence);
+- hidden continuation markers (root issue id non-empty, state marker presence);
 - the final assistant message;
 - a ready-to-paste `ledger_row` for docs/sdd/ledger-latency-running.md.
 
@@ -26,9 +25,9 @@ DP_ASK_TEAMS_SCRIPT); no other machine-specific assumption is baked in, and a
 missing helper fails fast with an actionable error. Standard library only.
 
 Usage:
-  python3 scripts/remote_probe.py --agent 运维团长test --message "查询维修工单" \
-      [--round query] [--timeout 300] [--session <id>] [--env test] \
-      [--workspace deepsense-workspace] [--poll-interval 5] \
+  python3 scripts/remote_probe.py --agent <agent-name> --message "测试消息" \
+      [--round smoke] [--timeout 300] [--session <id>] [--env test] \
+      [--workspace <workspace-slug>] [--poll-interval 5] \
       [--debug-port 9228] [--ask-teams-script /path/to/ask_teams_agent.py] \
       [--print-row]
 """
@@ -46,17 +45,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-SCHEMA_NAME = "device-ops-remote-probe/1"
+SCHEMA_NAME = "industrial-agent-remote-probe/1"
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
-DEFAULT_ASK_TEAMS_SCRIPT = "/Users/liusu/.claude/skills/dp-ask-teams/scripts/ask_teams_agent.py"
 ASK_TEAMS_SCRIPT_ENV = "DP_ASK_TEAMS_SCRIPT"
-DEFAULT_WORKSPACE_SLUG = "deepsense-workspace"
 DEFAULT_POLL_INTERVAL_SECONDS = 5.0
 DEFAULT_TIMEOUT_SECONDS = 300.0
 MAX_CONSECUTIVE_POLL_ERRORS = 5
 
-SQUAD_ROOT_MARKER = re.compile(r"<!--\s*squad_root_issue_id:([^>]*?)\s*-->")
-MES_STATE_MARKER = re.compile(r"<!--\s*mes_state:[^:\s]+:[A-Za-z0-9_+/-]+={0,2}\s*-->")
+ROOT_MARKER = re.compile(
+    r"<!--\s*(?:squad_root_issue_id|team_root_issue_id|expert_root_issue_id):([^>]*?)\s*-->"
+)
+STATE_MARKER = re.compile(
+    r"<!--\s*(?:team_state|expert_state|chain_state):[^>]*?-->" ,
+    re.IGNORECASE,
+)
 
 EXIT_COMPLETED = 0
 EXIT_BUSINESS_FAILURE = 1
@@ -146,12 +148,12 @@ def parse_iso_timestamp(value: object) -> datetime | None:
 
 def extract_markers(message_text: str) -> dict:
     text_value = message_text or ""
-    match = SQUAD_ROOT_MARKER.search(text_value)
+    match = ROOT_MARKER.search(text_value)
     root_value = match.group(1).strip() if match else ""
     return {
-        "squad_root_issue_id": root_value,
-        "squad_root_nonempty": bool(root_value),
-        "mes_state_present": bool(MES_STATE_MARKER.search(text_value)),
+        "root_issue_id": root_value,
+        "root_nonempty": bool(root_value),
+        "state_marker_present": bool(STATE_MARKER.search(text_value)),
     }
 
 
@@ -209,7 +211,7 @@ def render_ledger_row(result: dict) -> str:
     timings = result.get("timings") or {}
     date = str(result.get("sent_at") or "")[:10] or "-"
     if result.get("final_assistant_message"):
-        marker_cell = "yes" if (result.get("markers") or {}).get("squad_root_nonempty") else "no"
+        marker_cell = "yes" if (result.get("markers") or {}).get("root_nonempty") else "no"
     else:
         marker_cell = "-"
     cells = [
@@ -417,11 +419,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--env", default="test", choices=("test", "prod"),
                         help="Agent Teams environment (default test)")
     parser.add_argument("--workspace", default="",
-                        help=f"workspace slug (default $AGENT_TEAMS_WORKSPACE_SLUG or {DEFAULT_WORKSPACE_SLUG})")
+                        help="workspace slug (required unless $AGENT_TEAMS_WORKSPACE_SLUG is set)")
     parser.add_argument("--debug-port", type=int, default=None,
                         help="DeepWorks desktop DevTools debug port (skip auto discovery)")
     parser.add_argument("--ask-teams-script", default="",
-                        help=f"path to ask_teams_agent.py (default ${ASK_TEAMS_SCRIPT_ENV} or {DEFAULT_ASK_TEAMS_SCRIPT})")
+                        help=f"path to ask_teams_agent.py (or ${ASK_TEAMS_SCRIPT_ENV})")
     parser.add_argument("--token", default="",
                         help="bearer token (skip desktop bridging); default $AGENT_TEAMS_TOKEN")
     parser.add_argument("--title-prefix", default="remote-probe", help="chat session title prefix")
@@ -438,14 +440,19 @@ def main(argv: list[str] | None = None) -> int:
     workspace_slug = (
         args.workspace
         or os.environ.get("AGENT_TEAMS_WORKSPACE_SLUG", "").strip()
-        or DEFAULT_WORKSPACE_SLUG
     )
     script_path = (
         args.ask_teams_script
         or os.environ.get(ASK_TEAMS_SCRIPT_ENV, "").strip()
-        or DEFAULT_ASK_TEAMS_SCRIPT
     )
     try:
+        if not workspace_slug:
+            raise ProbeConfigError("--workspace or AGENT_TEAMS_WORKSPACE_SLUG is required")
+        if not script_path:
+            raise ProbeConfigError(
+                f"--ask-teams-script or {ASK_TEAMS_SCRIPT_ENV} is required "
+                "(path to dp-ask-teams ask_teams_agent.py)"
+            )
         module = load_ask_teams_module(script_path)
         token = args.token or os.environ.get("AGENT_TEAMS_TOKEN", "").strip()
         if not token:

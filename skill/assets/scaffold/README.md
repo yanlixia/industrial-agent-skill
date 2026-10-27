@@ -1,23 +1,20 @@
-# 工业智能体模板骨架
+# 模板目录
 
-复制本目录到新智能体仓库后：
+不要手工复制本目录。用生成器创建单专家或专家团：
 
-1. 把 `DOMAIN` 全局替换为领域名（如 `device-ops`、`energy`）。
-2. 补全 `{业务}`、事件表、输出契约、幂等键。
-3. 按 `references/file-templates.md` 实现 `turn.py` 与 `contracts/`。
-4. 落 `tests/`：路由全矩阵、幂等并发、黄金 issue 树、**状态往返契约**、子进程错误通道。
-5. CI 必须含 `python3 scripts/check_marker_contract.py`（emit/exempt 一致性门）。
-6. 落 `scripts/remote_probe.py`（回放探针）与 `docs/ledger-latency.md`（延迟台账）。
+```bash
+python3 tools/scaffold.py --mode single --domain energy --title 能源专家 --target ./energy
+python3 tools/scaffold.py --mode team --domain energy --title 能源专家团 \
+  --roles diagnosis,maintenance --target ./energy-team
+```
 
-## 自带的已验证实现（改参数，不要从散文重写）
+目录说明：
 
-| 文件 | 说明 |
-|---|---|
-| `skills/DOMAIN-orchestrate/scripts/validate_reply.py` | 验收门。含隐形续链 marker 豁免正则——**新增 marker 命名空间必须加进 `CONTINUATION_MARKER_PATTERN`**，CI 的 marker contract 检查会强制这一点（豁免缺失 = 模型被逼删 marker = 跨轮状态链断，v3 DW-OBS-143 实证） |
-| `scripts/check_marker_contract.py` | CI 一致性门。扫回层文件（turn.py/render_reply.py/*relay*/*reply*，可用 --reply-files 增补）emit 的 marker 命名空间，断言全部在 validator 豁免清单。**注意启发式局限**：marker 若在既定命名模式之外的文件里拼进回复（如 v3 的 mes_query_flow.py），必须用 --reply-files 显式声明 |
+- `templates/common/`：两种形态共用（回复验收、marker 契约、测试、doctor）。
+- `templates/single/`：单专家入口和主 Skill。
+- `templates/team/base/`：团长入口和 orchestrate Skill。
+- `templates/team/role/`：每个成员 Agent 的入口、soul 和角色 Skill。
 
-## 状态通道铁律（v3 实证，违反必断链）
+生成器会把 `runtime.py` / `validate_reply.py` 复制进每个 Skill 的 `scripts/`，并给专家团生成 `config/team.json`。这样平台只挂载 Skill 目录时也能运行。
 
-1. **权威状态放 issue description / artifact**（平台原生、不过 LLM 手）；回复内 marker 只做加速通道。
-2. marker 解码/校验失败 → 静默回退 issue 恢复，绝不 escalate（模型复述长 base64 会抄错字符，DW-OBS-146 实证 2 处/672 字符）。
-3. 回复文本会被截断（平台单条 3000 字）、被验收器删、被模型改写——设计任何跨轮机制前先假设它会发生。
+模板只提供可运行骨架。生成后必须补领域 provider、真实 Agent ID、squad 绑定，跑 `doctor.py --release`，并在 DeepWorks test 环境新建会话验收。

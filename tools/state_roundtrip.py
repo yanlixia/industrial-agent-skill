@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Cross-turn state roundtrip contract harness (no platform required).
 
-The single most expensive class of bug in single-executor agents (v3
-2026-10-27, DW-OBS-143/146): every component test green, the chain still
+The single most expensive class of cross-turn bug in experts and team leaders
+(v3 2026-10-27, DW-OBS-143/146): every component test green, the chain still
 100% broken, because no test walks the FULL pipeline —
 
     query turn emits state marker -> LLM drafts reply -> validate_reply

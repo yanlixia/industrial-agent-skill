@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "member result",
+  "type": "object",
+  "required": ["ok", "role", "result", "timings"],
+  "properties": {
+    "ok": {"type": "boolean"},
+    "role": {"type": "string"},
+    "child_issue_id": {"type": "string"},
+    "member_result_key": {"type": "string", "description": "Stable key for idempotent result recovery."},
+    "result": {
+      "type": "object",
+      "required": ["summary"],
+      "properties": {
+        "summary": {"type": "string"},
+        "facts": {"type": "object"},
+        "artifacts": {"type": "array"}
+      }
+    },
+    "error": {"type": "object"},
+    "timings": {
+      "type": "object",
+      "required": ["total_ms"],
+      "properties": {"total_ms": {"type": "integer", "minimum": 0}}
+    }
+  }
+}

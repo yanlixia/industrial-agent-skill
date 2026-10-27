@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "team child dispatch",
+  "type": "object",
+  "required": ["parent_issue_id", "role", "idempotency_key", "input_payload", "acceptance_criteria"],
+  "properties": {
+    "parent_issue_id": {"type": "string", "minLength": 1},
+    "role": {"type": "string", "minLength": 1},
+    "idempotency_key": {"type": "string", "minLength": 8},
+    "input_payload": {"type": "object"},
+    "acceptance_criteria": {"type": "string", "minLength": 1},
+    "deadline_seconds": {"type": "integer", "minimum": 1}
+  }
+}

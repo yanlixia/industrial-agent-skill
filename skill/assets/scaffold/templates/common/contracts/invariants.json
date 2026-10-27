@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "description": "Fill business invariants before adding side effects.",
+  "sideEffects": [
+    {
+      "name": "example",
+      "idempotencyKey": "root_issue_id|role|business_id|operation",
+      "expectedCount": 1
+    }
+  ]
+}

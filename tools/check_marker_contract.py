@@ -1,120 +1,143 @@
 #!/usr/bin/env python3
-"""Emit/exempt consistency gate (CI check, zero external deps).
-
-Lessons baked in (device-ops 2026-10-27, DW-OBS-143):
-
-The orchestrator emits invisible continuation markers that the renderer must
-copy verbatim; the reply validator bans raw uuids. Those two rules contradict
-unless every marker the codebase emits INTO USER-VISIBLE REPLIES is exempted
-in validate_reply.py. Humans fix the instance they can see and miss the
-class — this script makes the class visible.
-
-Scope rule (important, do not widen blindly): only scripts that assemble the
-user-visible reply are checked, because only their markers pass through the
-validator. Markers written into issue descriptions (idempotency keys,
-payloads for other machines) never meet the uuid ban and must NOT be forced
-into the exemption list. Reply-layer files are detected by name:
-turn.py, render_reply.py, and any *relay*/reply* module. Override with
---reply-files a.py,b.py when the naming differs.
-
-Usage:
-    python3 scripts/check_marker_contract.py [root] [--reply-files a.py,b.py]
-
-Exits 0 when consistent, 1 with a report of mismatches.
-"""
+"""Check that every reply-layer marker is exempted by validate_reply.py."""
 
 from __future__ import annotations
 
 import argparse
+import ast
+import fnmatch
+import json
 import re
 import sys
 from pathlib import Path
+from typing import Dict, List, Set
 
-# Marker emission sites: `f"<!-- {namespace}:{payload} -->"` or the literal
-# string form `<!-- namespace:...`. The first capture group is the namespace.
 EMIT_PATTERN = re.compile(r"<!\x2D\x2D\s*([a-z_][a-z0-9_]*):", re.IGNORECASE)
 
-# Files whose output becomes (part of) the user-visible reply.
-DEFAULT_REPLY_FILES = ("turn.py", "render_reply.py")
+DEFAULT_REPLY_FILES = {
+    "turn.py",
+    "run.py",
+    "render_reply.py",
+    "runtime.py",
+}
+DEFAULT_REPLY_PATTERNS = ("*reply*.py", "*relay*.py")
 
 
-def _is_reply_layer(path: Path, extra: set[str]) -> bool:
-    name = path.name
-    if name in DEFAULT_REPLY_FILES or name in extra:
-        return True
-    lowered = name.lower()
-    return "relay" in lowered or "reply" in lowered
+def _load_config(root: Path) -> Dict[str, object]:
+    path = root / "contracts" / "markers.json"
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
-def validator_namespaces(scripts_dir: Path) -> set[str]:
-    """Parse the exemption regex out of validate_reply.py."""
-    validator = scripts_dir / "validate_reply.py"
+def validator_namespaces(validator: Path) -> Set[str]:
     if not validator.is_file():
         return set()
     text = validator.read_text(encoding="utf-8")
-    # The pattern body contains "> " inside the string, so [^)] truncates at
-    # the first alternation member; grab the whole raw-string literal instead.
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        tree = None
+    if tree is not None:
+        for node in tree.body:
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names = {target.id for target in targets if isinstance(target, ast.Name)}
+            if "CONTINUATION_MARKER_NAMESPACES" not in names:
+                continue
+            try:
+                value = ast.literal_eval(node.value)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(value, (tuple, list, set)):
+                return {str(item).lower() for item in value}
     match = re.search(
-        r"CONTINUATION_MARKER_PATTERN\s*=\s*re\.compile\(\s*r?(\".*?\"|'.*?')", text, re.S
+        r"CONTINUATION_MARKER_PATTERN\s*=\s*re\.compile\(\s*r?(\".*?\"|'.*?')",
+        text,
+        re.S,
     )
     if not match:
         return set()
     body = match.group(1)
-    # Names inside (?:a|b|c) groups joined by |.
-    namespaces: set[str] = set()
+    namespaces: Set[str] = set()
     for group in re.findall(r"\(\?:([^)]*)\)", body):
         namespaces.update(part.strip() for part in group.split("|") if part.strip())
     return namespaces
 
 
-def emitted_namespaces(scripts_dir: Path, reply_files: set[str]) -> dict[str, str]:
-    """Scan reply-layer scripts for emitted marker namespaces."""
-    found: dict[str, str] = {}
-    for path in sorted(scripts_dir.rglob("*.py")):
-        if not _is_reply_layer(path, reply_files):
+def _matches_any(path: Path, globs: List[str]) -> bool:
+    rel = path.as_posix()
+    name = path.name
+    for pattern in globs:
+        if name in DEFAULT_REPLY_FILES:
+            return True
+        if any(fnmatch.fnmatchcase(name, candidate) for candidate in DEFAULT_REPLY_PATTERNS):
+            return True
+        if fnmatch.fnmatchcase(rel, pattern):
+            return True
+        if pattern.startswith("**/") and fnmatch.fnmatchcase(rel, pattern[3:]):
+            return True
+        if "/" not in pattern and fnmatch.fnmatchcase(name, pattern):
+            return True
+    return False
+
+
+def emitted_namespaces(root: Path, globs: List[str]) -> Dict[str, str]:
+    found: Dict[str, str] = {}
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root)
+        if any(part in {"__pycache__", ".venv", "node_modules", "tests"} for part in relative.parts):
+            continue
+        if not _matches_any(relative, globs):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for match in EMIT_PATTERN.finditer(text):
-            namespace = match.group(1).lower()
-            found.setdefault(namespace, str(path))
+            found.setdefault(match.group(1).lower(), str(relative))
     return found
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("root", nargs="?", default=".", help="repo/skill root to scan")
-    parser.add_argument(
-        "--reply-files",
-        default="",
-        help="comma-separated extra reply-layer file names (beyond turn.py/render_reply.py/*relay*/*reply*)",
-    )
+    parser.add_argument("root", nargs="?", default=".", help="generated repo/skill root")
+    parser.add_argument("--reply-files", default="", help="comma-separated extra globs or file names")
     args = parser.parse_args(argv)
     root = Path(args.root)
-    reply_files = {part.strip() for part in args.reply_files.split(",") if part.strip()}
+    config = _load_config(root)
+    globs = ["**/" + name for name in sorted(DEFAULT_REPLY_FILES)]
+    globs.extend("**/" + pattern for pattern in DEFAULT_REPLY_PATTERNS)
+    configured = config.get("reply_globs")
+    if isinstance(configured, list):
+        globs.extend(str(item) for item in configured)
+    globs.extend(part.strip() for part in args.reply_files.split(",") if part.strip())
 
-    validators = sorted(root.rglob("validate_reply.py"))
-    if not validators:
-        print("marker contract: no validate_reply.py found under root; nothing to check")
-        return 0
+    validator = root / "scripts" / "validate_reply.py"
+    configured_validator = config.get("validator")
+    if isinstance(configured_validator, str):
+        validator = root / configured_validator
+    if not validator.is_file():
+        found = sorted(root.rglob("validate_reply.py"))
+        if not found:
+            print("marker contract: no validate_reply.py found under %s" % root)
+            return 0
+        validator = found[0]
 
-    emitted: dict[str, str] = {}
-    exempted: set[str] = set()
-    for validator in validators:
-        exempted |= validator_namespaces(validator.parent)
-        emitted.update(emitted_namespaces(validator.parent.parent, reply_files))
-
-    missing = {ns: path for ns, path in emitted.items() if ns not in exempted}
+    emitted = emitted_namespaces(root, globs)
+    exempted = validator_namespaces(validator)
+    missing = {name: path for name, path in emitted.items() if name not in exempted}
     if missing:
-        print("marker contract violations: reply-layer marker emitted but not exempted in validate_reply.py")
+        print("marker contract violations: reply-layer marker emitted but not exempted")
         for namespace, path in sorted(missing.items()):
-            print(f"  - {namespace}  (emitted in {path})")
-        print("Fix: add the namespace to CONTINUATION_MARKER_PATTERN in validate_reply.py")
-        print("     (or, if the marker truly never reaches user replies, move it out of the reply layer).")
+            print("  - %s  (%s)" % (namespace, path))
+        print("Fix: add the namespace to CONTINUATION_MARKER_NAMESPACES in %s" % validator)
         return 1
-    print(f"marker contract ok: reply-layer markers {sorted(emitted)} all exempted")
+    print("marker contract ok: %s" % sorted(emitted))
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
-
