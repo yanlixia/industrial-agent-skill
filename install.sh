@@ -10,17 +10,18 @@
 #   bash install.sh
 #
 # What it does:
+#   0. when piped (no local repo), clones the repo to a temp cache first
 #   1. installs the skill (SKILL.md + references + scaffold) into
 #      ~/.agents/skills/industrial-agent-builder/  (the cross-CLI convention dir)
 #   2. links it for Claude Code at ~/.claude/skills/industrial-agent-builder
 #      (skip with SKIP_CLAUDE_LINK=1)
 #   3. optionally adds tools/ to PATH via ~/.agents/bin (skip with SKIP_TOOLS_PATH=1)
-#   4. verifies: python3 runs check_marker_contract.py and state_roundtrip.py self-tests
+#   4. verifies: python3 runs state_roundtrip.py self-test
 #
 # Idempotent: re-running updates in place. Never deletes other skills.
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_URL="https://github.com/yanlixia/industrial-agent-skill.git"
 SKILL_NAME="industrial-agent-builder"
 TARGET_BASE="${HOME}/.agents/skills"
 TARGET="${TARGET_BASE}/${SKILL_NAME}"
@@ -31,6 +32,19 @@ say() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
 command -v python3 >/dev/null 2>&1 || die "python3 is required (any 3.8+ works; tools are stdlib-only)"
+
+# Piped execution (curl | bash) has no local repo: clone to a cache dir.
+if [ -f "$(dirname "${BASH_SOURCE[0]:-$0}")/skill/SKILL.md" ]; then
+  REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+else
+  CACHE="${HOME}/.cache/industrial-agent-skill"
+  say "piped install: cloning ${REPO_URL} to ${CACHE}"
+  command -v git >/dev/null 2>&1 || die "git is required for piped install (or clone the repo and run install.sh inside)"
+  rm -rf "${CACHE}"
+  git clone --depth 1 "${REPO_URL}" "${CACHE}" >/dev/null 2>&1 || die "git clone failed"
+  REPO_DIR="${CACHE}"
+fi
+[ -f "${REPO_DIR}/skill/SKILL.md" ] || die "repo layout unexpected: skill/SKILL.md missing in ${REPO_DIR}"
 
 say "installing skill to ${TARGET}"
 mkdir -p "${TARGET_BASE}"
