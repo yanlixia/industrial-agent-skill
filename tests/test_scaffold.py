@@ -48,6 +48,13 @@ class ScaffoldAcceptanceTests(unittest.TestCase):
         self.assertEqual(manifest["mode"], mode)
         self.assertTrue((target / "docs/checklist.md").is_file())
         self.assertTrue((target / "docs/deploy.md").is_file())
+        self.assertTrue((target / "docs/quality-gates.md").is_file())
+        for contract in (
+            "contracts/expert-contract.schema.json",
+            "contracts/performance-budget.json",
+            "contracts/evaluation-suite.json",
+        ):
+            self.assertTrue((target / contract).is_file(), contract)
         self.assertTrue((target / ".industrial-agent-scaffold.json").is_file())
         for skill in manifest["skills"]:
             scripts = (target / skill).parent / "scripts"
@@ -87,6 +94,21 @@ class ScaffoldAcceptanceTests(unittest.TestCase):
                     (target / "experts" / role / "skills" / role / "scripts" / "run.py").is_file()
                 )
             self.assertTrue((target / "contracts" / "dispatch.schema.json").is_file())
+
+    def test_doctor_rejects_missing_quality_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "single"
+            self.generate(
+                "--mode", "single", "--domain", "energy", "--title", "能源专家",
+                "--target", str(target),
+            )
+            (target / "contracts/performance-budget.json").unlink()
+            doctor = subprocess.run(
+                [sys.executable, "scripts/doctor.py"],
+                cwd=target, text=True, capture_output=True, check=False,
+            )
+            self.assertNotEqual(doctor.returncode, 0)
+            self.assertIn("performance budget missing", doctor.stdout)
 
     def test_release_gate_requires_real_ids(self):
         with tempfile.TemporaryDirectory() as tmp:

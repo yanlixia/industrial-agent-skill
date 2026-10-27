@@ -1,0 +1,33 @@
+{
+  "schema": "industrial-agent/performance-budget/1",
+  "userTurn": {
+    "maxSeconds": 120,
+    "includes": [
+      "platform_dispatch",
+      "model_proxy",
+      "sandbox_materialization",
+      "model_inference",
+      "tool_execution",
+      "external_api",
+      "reply_rendering"
+    ]
+  },
+  "toolCall": {
+    "maxCountPerTurn": 12,
+    "serialBudgetSeconds": 120,
+    "parallelBudgetSeconds": 90
+  },
+  "context": {
+    "maxInputTokens": 12000,
+    "maxHistoryMessages": 8,
+    "strategy": "minimal_required_state"
+  },
+  "teamTopology": {
+    "maxDispatchedChildrenPerTurn": 1,
+    "parallelGroupsAllowed": false,
+    "payload": {
+      "maxFiles": 15,
+      "maxBytes": 204800
+    }
+  }
+}

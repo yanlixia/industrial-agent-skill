@@ -146,6 +146,27 @@ def check_team_config(payload):
     return config, team
 
 
+def check_quality_contracts():
+    required = {
+        "contracts/expert-contract.schema.json": "expert contract schema",
+        "contracts/performance-budget.json": "performance budget",
+        "contracts/evaluation-suite.json": "evaluation suite",
+        "docs/quality-gates.md": "quality gate documentation",
+    }
+    for path, label in required.items():
+        if not (ROOT / path).is_file():
+            raise ValueError("%s missing: %s" % (label, path))
+    budget = json.loads((ROOT / "contracts/performance-budget.json").read_text(encoding="utf-8"))
+    if int((budget.get("userTurn") or {}).get("maxSeconds") or 0) <= 0:
+        raise ValueError("performance budget must define a positive userTurn.maxSeconds")
+    if int((budget.get("toolCall") or {}).get("maxCountPerTurn") or 0) <= 0:
+        raise ValueError("performance budget must define a positive toolCall.maxCountPerTurn")
+    evaluation = json.loads((ROOT / "contracts/evaluation-suite.json").read_text(encoding="utf-8"))
+    for key in ("golden", "edgeCases", "concurrency"):
+        if not isinstance(evaluation.get(key), list) or not evaluation[key]:
+            raise ValueError("evaluation suite requires at least one %s case" % key)
+
+
 def check_release_ids(payload):
     if payload.get("mode") == "single":
         if not str((payload.get("leader") or {}).get("agentId") or "").strip():
@@ -206,6 +227,7 @@ def main(argv=None):
             return fail("declared skill missing: %s" % skill)
     try:
         check_skill_files(entry)
+        check_quality_contracts()
         if payload.get("mode") == "team":
             for contract in ("contracts/dispatch.schema.json", "contracts/team-plan.json"):
                 if not (ROOT / contract).is_file():

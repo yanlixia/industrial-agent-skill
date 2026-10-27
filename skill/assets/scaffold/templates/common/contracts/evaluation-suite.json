@@ -1,0 +1,29 @@
+{
+  "schema": "industrial-agent/evaluation-suite/1",
+  "golden": [
+    {
+      "name": "happy_path",
+      "input": "示例任务",
+      "expectedAction": "reply",
+      "mustContain": ["示例任务"],
+      "maxSeconds": 120
+    }
+  ],
+  "edgeCases": [
+    {
+      "name": "invalid_input",
+      "input": "",
+      "expectedAction": "ask_user",
+      "mustContain": ["请补充"]
+    }
+  ],
+  "concurrency": [
+    {
+      "name": "duplicate_side_effect",
+      "input": "示例任务",
+      "repeat": 2,
+      "expectedSideEffectCount": 1
+    }
+  ],
+  "regressions": []
+}
