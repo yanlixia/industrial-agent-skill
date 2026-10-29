@@ -21,7 +21,12 @@ cd industrial-agent-skill
 bash install.sh
 ```
 
-安装后 Skill 位于 `~/.agents/skills/industrial-agent-builder/`。
+安装后两个 Skill 位于：
+
+- `~/.agents/skills/industrial-agent-builder/`
+- `~/.agents/skills/session-storyboard/`
+
+`session-storyboard` 用于还原真实会话、定位耗时和副作用证据；它发现的跨领域性能经验可以在用户逐项确认后反哺本仓库。
 
 ### 单专家
 
@@ -92,12 +97,31 @@ python3 -m unittest discover -s tests -v      # 生成物验收
 
 正式发布还必须在 test 环境记录：事件时间线、dispatch/artifact/API 次数、最终用户消息、每轮 `timings` 和 P95。
 
+## 性能反馈闭环
+
+1. 用 `session-storyboard` 生成 `session-trace.json` 和 HTML 故事板。
+2. 只筛选跨领域、有 trace 证据、能落成模板/契约/测试的通用优化候选。
+3. 一次性向用户展示候选，用户逐项选择。
+4. 对每个选中候选运行：
+
+```bash
+python3 ~/.agents/skills/session-storyboard/scripts/feedback_issue.py \
+  --candidate <candidate.json> \
+  --trace <session-trace.json>
+```
+
+5. 脚本生成稳定幂等指纹，查重后在本仓库创建 `[storyboard]` issue。
+6. 后续改进 `industrial-agent-builder` 时优先消化这些 issue，并同批更新模板、契约或测试。
+
+无 `gh`、未登录或用户未逐项确认时不创建 issue。完整规则见 `session-storyboard/references/feedback-loop.md`。
+
 ## 仓库结构
 
 ```text
 skill/SKILL.md                  # Skill 入口：判形态 -> 生成 -> 实现 -> 验收
 skill/references/               # 决策、架构、DeepWorks、文件契约、清单
 skill/assets/scaffold/templates # single / team / common 模板
+session-storyboard/             # 会话性能分析与反馈闭环 Skill
 tools/scaffold.py               # 单专家/专家团生成器
 tools/runtime.py                # 生成物共用的 DeepWorks runtime
 tools/validate_reply.py         # 回复验收门

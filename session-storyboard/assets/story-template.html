@@ -1,0 +1,977 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Storyboard - 专家团会话回放</title>
+<style>
+  :root {
+    --bg: #070b14;
+    --panel: #0d1422;
+    --panel-2: #111b2c;
+    --line: #23314a;
+    --line-soft: rgba(120, 155, 205, .18);
+    --text: #e8eef9;
+    --muted: #8fa3c2;
+    --dim: #5f7392;
+    --cyan: #44d7ff;
+    --green: #4be0a1;
+    --amber: #ffb454;
+    --violet: #b38cff;
+    --red: #ff6b81;
+    --blue: #6ea8ff;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    --sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); }
+  body {
+    background:
+      radial-gradient(900px 480px at 12% -8%, rgba(68, 215, 255, .12), transparent 62%),
+      radial-gradient(760px 420px at 94% 4%, rgba(179, 140, 255, .11), transparent 58%),
+      linear-gradient(180deg, #070b14 0%, #080d18 44%, #060a12 100%);
+  }
+  .topbar {
+    height: 58px; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 32px; border-bottom: 1px solid var(--line-soft);
+    background: rgba(7, 11, 20, .82); backdrop-filter: blur(16px);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: .14em; font-size: 12px; }
+  .brand-mark {
+    width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+    background: conic-gradient(from 210deg, var(--cyan), var(--violet), var(--green), var(--cyan));
+    color: #06111d; font-size: 13px; box-shadow: 0 0 22px rgba(68, 215, 255, .35);
+  }
+  .topbar-right { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+  .pill {
+    border: 1px solid var(--line); background: rgba(17, 27, 44, .7);
+    padding: 5px 10px; border-radius: 999px; font-size: 11px; color: var(--muted);
+  }
+  .pill.live { color: var(--green); border-color: rgba(75, 224, 161, .3); background: rgba(75, 224, 161, .08); }
+  main { padding: 28px 32px 46px; max-width: 1680px; margin: 0 auto; }
+  .hero { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin-bottom: 22px; }
+  .eyebrow { color: var(--cyan); font-size: 11px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; margin-bottom: 10px; }
+  h1 { margin: 0; font-size: clamp(28px, 3.1vw, 46px); line-height: 1.04; letter-spacing: -.035em; font-weight: 760; }
+  h1 span { color: var(--muted); font-weight: 480; }
+  h1.long span { display: block; margin-top: 5px; font-size: .72em; }
+  .sub { margin-top: 12px; color: var(--muted); font-size: 13px; line-height: 1.7; max-width: 780px; }
+  .hero-meta { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; min-width: 280px; }
+  .status-badge {
+    display: inline-flex; align-items: center; gap: 8px; padding: 8px 13px; border-radius: 10px;
+    border: 1px solid rgba(75, 224, 161, .35); background: rgba(75, 224, 161, .08);
+    color: var(--green); font-weight: 700; font-size: 12px; letter-spacing: .04em;
+  }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); }
+  .meta-line { color: var(--dim); font-size: 11px; font-family: var(--mono); }
+  .kpis { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .kpi {
+    background: linear-gradient(180deg, rgba(17, 27, 44, .9), rgba(11, 18, 31, .9));
+    border: 1px solid var(--line-soft); border-radius: 14px; padding: 15px 16px; min-height: 92px;
+    position: relative; overflow: hidden;
+  }
+  .kpi::after { content: ""; position: absolute; inset: auto 12px 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(68, 215, 255, .35), transparent); opacity: .55; }
+  .kpi-label { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: .12em; white-space: nowrap; }
+  .kpi-value { margin-top: 9px; font-size: 25px; font-weight: 760; letter-spacing: -.03em; line-height: 1; }
+  .kpi-unit { font-size: 12px; color: var(--muted); font-weight: 500; margin-left: 3px; letter-spacing: 0; }
+  .kpi-note { margin-top: 7px; color: var(--dim); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi.good .kpi-value { color: var(--green); }
+  .kpi.warn .kpi-value { color: var(--amber); }
+  .kpi.cyan .kpi-value { color: var(--cyan); }
+  .kpi.violet .kpi-value { color: var(--violet); }
+  .main-grid { display: grid; grid-template-columns: minmax(0, 1.62fr) minmax(340px, .72fr); gap: 16px; align-items: start; }
+  .left, .right { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .panel {
+    background: linear-gradient(180deg, rgba(16, 25, 41, .92), rgba(10, 16, 28, .94));
+    border: 1px solid var(--line-soft); border-radius: 16px; overflow: hidden;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .18);
+  }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 18px 12px; border-bottom: 1px solid var(--line-soft); }
+  .panel-title { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: #c8d6eb; font-weight: 700; }
+  .panel-sub { color: var(--dim); font-size: 10px; font-family: var(--mono); }
+  .panel-body { padding: 16px 18px 18px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; padding: 10px 18px; border-bottom: 1px solid var(--line-soft); background: rgba(9, 14, 25, .45); }
+  .legend-item { display: inline-flex; gap: 6px; align-items: center; color: var(--dim); font-size: 10px; }
+  .swatch { width: 8px; height: 8px; border-radius: 3px; }
+  .timeline-scroll { overflow-x: auto; overflow-y: hidden; padding: 12px 18px 4px; }
+  .timeline { min-width: 720px; position: relative; padding-left: 156px; }
+  .ruler { height: 28px; position: relative; margin-left: 0; border-bottom: 1px solid var(--line-soft); }
+  .tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid rgba(120, 155, 205, .12); }
+  .tick span { position: absolute; top: 7px; left: 6px; color: var(--dim); font-size: 9px; font-family: var(--mono); white-space: nowrap; }
+  .lane { position: relative; height: 54px; border-bottom: 1px solid rgba(120, 155, 205, .07); }
+  .lane:last-child { border-bottom: 0; }
+  .lane-label { position: absolute; left: -156px; top: 0; width: 146px; height: 54px; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding-right: 8px; }
+  .lane-name { font-size: 11px; font-weight: 700; color: #c9d7ec; }
+  .lane-kind { font-family: var(--mono); font-size: 9px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lane-track { position: absolute; inset: 0; background-image: linear-gradient(90deg, rgba(120,155,205,.08) 1px, transparent 1px); background-size: 12.5% 100%; }
+  .span {
+    position: absolute; top: 14px; height: 26px; border-radius: 7px; padding: 5px 8px;
+    color: #06111d; font-size: 9px; font-weight: 760; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    box-shadow: 0 6px 20px rgba(0,0,0,.18); cursor: pointer; transition: transform .14s ease, filter .14s ease;
+    border: 1px solid rgba(255,255,255,.16);
+  }
+  .span:hover { transform: translateY(-1px); filter: brightness(1.1); z-index: 5; }
+  .span.platform { background: linear-gradient(180deg, #97a7bd, #73839b); color: #08111f; }
+  .span.model { background: linear-gradient(180deg, #c9b3ff, #9f7cff); color: #130b26; }
+  .span.tool { background: linear-gradient(180deg, #72e7ff, #3ec5ed); color: #04131b; }
+  .span.member { background: linear-gradient(180deg, #71f0be, #3bd594); color: #04170f; }
+  .span.external { background: linear-gradient(180deg, #ffd08a, #ffb454); color: #211204; }
+  .span.error { background: linear-gradient(180deg, #ff9aaa, #ff6b81); color: #26050c; }
+  .span.artifact { background: linear-gradient(180deg, #b9c7ff, #7d95ff); color: #080f2a; }
+  .span.label-off { padding: 0; }
+  .span.label-off::after { content: ""; }
+  .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--cyan); box-shadow: 0 0 16px rgba(68,215,255,.9); pointer-events: none; z-index: 10; }
+  .playhead::before { content: ""; position: absolute; top: -5px; left: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 12px var(--cyan); }
+  .transport { display: flex; align-items: center; gap: 12px; padding: 12px 18px 16px; border-top: 1px solid var(--line-soft); background: rgba(7, 12, 22, .36); }
+  .icon-btn {
+    width: 34px; height: 34px; border-radius: 10px; border: 1px solid rgba(68,215,255,.35);
+    background: rgba(68,215,255,.1); color: var(--cyan); cursor: pointer; font-size: 14px;
+  }
+  .icon-btn:hover { background: rgba(68,215,255,.18); }
+  .scrub { flex: 1; accent-color: var(--cyan); height: 4px; }
+  .timecode { font-family: var(--mono); color: var(--cyan); font-size: 12px; min-width: 92px; text-align: right; }
+  .speed { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 11px; }
+  .now {
+    padding: 18px; min-height: 218px; position: relative; overflow: hidden;
+    background: radial-gradient(340px 160px at 100% 0%, rgba(68,215,255,.12), transparent 65%);
+  }
+  .now-time { font-family: var(--mono); color: var(--cyan); font-size: 11px; letter-spacing: .06em; }
+  .now-type { display: inline-flex; margin-top: 12px; padding: 4px 8px; border-radius: 999px; background: rgba(68,215,255,.1); color: var(--cyan); border: 1px solid rgba(68,215,255,.24); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+  .now-title { margin-top: 12px; font-size: 20px; line-height: 1.22; font-weight: 740; letter-spacing: -.02em; }
+  .now-detail { margin-top: 9px; color: var(--muted); font-size: 11px; line-height: 1.65; }
+  .now-actor { margin-top: 14px; display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 10px; font-family: var(--mono); }
+  .actor-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .sandbox { padding: 14px 18px 16px; display: grid; gap: 11px; }
+  .sandbox-empty { padding: 16px 18px 19px; color: var(--dim); font-size: 10px; line-height: 1.65; }
+  .sandbox-row { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+  .sandbox-k { color: var(--dim); font-size: 9px; text-transform: uppercase; letter-spacing: .09em; }
+  .sandbox-v { color: #c8d6e9; font-size: 10px; line-height: 1.55; overflow-wrap: anywhere; }
+  .sandbox-v.mono { font-family: var(--mono); color: var(--cyan); font-size: 9.5px; }
+  .sandbox-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .sandbox-chip { display: inline-flex; padding: 3px 7px; border-radius: 6px; border: 1px solid rgba(120,155,205,.18); background: rgba(120,155,205,.06); color: #aebdd3; font-family: var(--mono); font-size: 9px; }
+  .sandbox-chip.ok { border-color: rgba(75,224,161,.22); background: rgba(75,224,161,.07); color: var(--green); }
+  .sandbox-chip.warn { border-color: rgba(255,180,84,.22); background: rgba(255,180,84,.07); color: var(--amber); }
+  .sandbox-foot { padding-top: 9px; border-top: 1px dashed rgba(120,155,205,.16); color: var(--dim); font-size: 9px; line-height: 1.55; }
+  .round-list { display: flex; flex-direction: column; }
+  .round {
+    display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 13px 18px;
+    border-bottom: 1px solid rgba(120,155,205,.08); cursor: pointer;
+  }
+  .round:last-child { border-bottom: 0; }
+  .round:hover, .round.active { background: rgba(68,215,255,.055); }
+  .round-name { font-size: 12px; color: #cbd8eb; font-weight: 650; }
+  .round-meta { color: var(--dim); font-size: 10px; margin-top: 4px; font-family: var(--mono); }
+  .round-time { color: var(--cyan); font-family: var(--mono); font-size: 12px; }
+  .events { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .events-wrap { max-height: 560px; overflow: auto; }
+  .events thead { position: sticky; top: 0; z-index: 2; background: #0d1728; }
+  .events th { text-align: left; color: var(--dim); font-size: 9px; text-transform: uppercase; letter-spacing: .1em; padding: 0 10px 9px; border-bottom: 1px solid var(--line-soft); }
+  .events td { padding: 10px; border-bottom: 1px solid rgba(120,155,205,.06); vertical-align: top; }
+  .events tr:last-child td { border-bottom: 0; }
+  .events tbody tr:hover { background: rgba(68,215,255,.045); }
+  .events tbody tr { cursor: pointer; }
+  .event-time { font-family: var(--mono); color: var(--cyan); white-space: nowrap; }
+  .event-title { color: #d6e2f4; }
+  .event-detail { color: var(--dim); font-size: 10px; margin-top: 3px; max-width: 620px; }
+  .event-tools { display: flex; align-items: center; gap: 6px; }
+  .event-filter {
+    border: 1px solid var(--line); background: rgba(17,27,44,.7); color: var(--dim);
+    padding: 4px 9px; border-radius: 999px; font: 10px var(--mono); cursor: pointer;
+  }
+  .event-filter.active { color: var(--cyan); border-color: rgba(68,215,255,.35); background: rgba(68,215,255,.08); }
+  .tag { display: inline-flex; align-items: center; padding: 3px 7px; border-radius: 999px; font-size: 9px; font-weight: 650; letter-spacing: .03em; }
+  .tag.member { background: rgba(75,224,161,.1); color: var(--green); border: 1px solid rgba(75,224,161,.2); }
+  .tag.tool { background: rgba(68,215,255,.1); color: var(--cyan); border: 1px solid rgba(68,215,255,.2); }
+  .tag.api { background: rgba(255,180,84,.1); color: var(--amber); border: 1px solid rgba(255,180,84,.2); }
+  .tag.artifact { background: rgba(179,140,255,.1); color: var(--violet); border: 1px solid rgba(179,140,255,.2); }
+  .tag.platform { background: rgba(180,195,215,.1); color: #b4c3d7; border: 1px solid rgba(180,195,215,.18); }
+  .topology { padding: 18px; display: flex; flex-direction: column; gap: 0; }
+  .node { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: 10px; border: 1px solid transparent; }
+  .node:hover { background: rgba(68,215,255,.04); border-color: rgba(68,215,255,.12); }
+  .node-icon { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-size: 11px; font-weight: 800; background: rgba(68,215,255,.09); color: var(--cyan); }
+  .node.member .node-icon { background: rgba(75,224,161,.09); color: var(--green); }
+  .node-title { font-size: 11px; color: #cdd9ea; }
+  .node-meta { font-size: 9px; color: var(--dim); font-family: var(--mono); margin-top: 2px; }
+  .node-line { height: 12px; margin-left: 23px; border-left: 1px dashed rgba(120,155,205,.3); }
+  .findings { padding: 8px 18px 16px; }
+  .finding { display: flex; gap: 10px; padding: 11px 0; border-bottom: 1px solid rgba(120,155,205,.07); }
+  .finding:last-child { border-bottom: 0; }
+  .finding-icon { flex: 0 0 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; font-size: 10px; font-weight: 800; background: rgba(255,180,84,.1); color: var(--amber); }
+  .finding.good .finding-icon { background: rgba(75,224,161,.1); color: var(--green); }
+  .finding-title { font-size: 11px; color: #d0dcee; font-weight: 650; }
+  .finding-desc { margin-top: 3px; font-size: 10px; line-height: 1.55; color: var(--dim); }
+  .sources { padding: 14px 18px 17px; display: grid; gap: 9px; }
+  .source-row { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; color: var(--dim); }
+  .source-row b { color: #b9c8dc; font-weight: 600; }
+  .source-bar { height: 4px; border-radius: 4px; background: rgba(120,155,205,.12); overflow: hidden; }
+  .source-bar i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--cyan), var(--green)); }
+  .gap-list { padding: 0 18px 14px; display: grid; gap: 6px; }
+  .gap-item { color: var(--amber); font-size: 9px; line-height: 1.55; padding-left: 10px; position: relative; }
+  .gap-item::before { content: "!"; position: absolute; left: 0; color: var(--amber); font-weight: 800; }
+  .hint { color: var(--dim); font-size: 10px; line-height: 1.6; padding: 0 18px 16px; }
+  .mono { font-family: var(--mono); }
+  .muted { color: var(--muted); }
+  .dim { color: var(--dim); }
+  .tag.error { background: rgba(255,107,129,.12); color: var(--red); border: 1px solid rgba(255,107,129,.28); }
+  .btn {
+    border: 1px solid var(--line); background: rgba(17,27,44,.78); color: #c5d4e8;
+    padding: 6px 10px; border-radius: 8px; font: 10px var(--mono); cursor: pointer;
+  }
+  .btn:hover { border-color: rgba(68,215,255,.35); color: var(--cyan); }
+  .btn.primary { color: var(--cyan); border-color: rgba(68,215,255,.32); background: rgba(68,215,255,.08); }
+  .view-switch { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+  .view-chip {
+    border: 1px solid var(--line); background: rgba(17,27,44,.72); color: var(--dim);
+    padding: 5px 9px; border-radius: 999px; font: 9px var(--mono); cursor: pointer; max-width: 180px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .view-chip:hover { color: #d7e4f4; border-color: rgba(68,215,255,.25); }
+  .view-chip.active { color: var(--cyan); border-color: rgba(68,215,255,.38); background: rgba(68,215,255,.1); }
+  .task-list { padding: 10px 14px 14px; display: grid; gap: 8px; max-height: 400px; overflow: auto; }
+  .task-row { border: 1px solid rgba(120,155,205,.14); border-radius: 10px; padding: 10px; cursor: pointer; background: rgba(9,15,26,.45); }
+  .task-row:hover { border-color: rgba(68,215,255,.3); background: rgba(68,215,255,.045); }
+  .task-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .task-title { color: #d3e0f0; font-size: 11px; font-weight: 650; line-height: 1.35; }
+  .task-status { font: 9px var(--mono); color: var(--green); white-space: nowrap; }
+  .task-status.running { color: var(--amber); }
+  .task-status.failed { color: var(--red); }
+  .task-meta { margin-top: 5px; color: var(--dim); font: 9px/1.55 var(--mono); overflow-wrap: anywhere; }
+  .error-list { padding: 10px 14px 14px; display: grid; gap: 8px; max-height: 360px; overflow: auto; }
+  .error-row { border: 1px solid rgba(255,107,129,.16); border-left: 2px solid var(--red); border-radius: 8px; padding: 9px 10px; cursor: pointer; background: rgba(255,107,129,.035); }
+  .error-row.warning { border-color: rgba(255,180,84,.18); border-left-color: var(--amber); background: rgba(255,180,84,.035); }
+  .error-row:hover { filter: brightness(1.12); }
+  .error-cat { font: 9px var(--mono); color: var(--red); text-transform: uppercase; letter-spacing: .06em; }
+  .error-row.warning .error-cat { color: var(--amber); }
+  .error-line { margin-top: 5px; color: #c8d6e9; font-size: 10px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .evidence { padding: 12px 14px 16px; }
+  .evidence-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .evidence-input {
+    flex: 1; min-width: 190px; background: #070c15; border: 1px solid var(--line); color: var(--text);
+    border-radius: 8px; padding: 8px 10px; font: 10px var(--mono); outline: none;
+  }
+  .evidence-input:focus { border-color: rgba(68,215,255,.42); box-shadow: 0 0 0 2px rgba(68,215,255,.08); }
+  .evidence-layer { font: 9px var(--mono); color: var(--cyan); margin-bottom: 8px; }
+  .evidence-layer.raw { color: var(--amber); }
+  .evidence-results { max-height: 420px; overflow: auto; display: grid; gap: 6px; }
+  .evidence-row { border: 1px solid rgba(120,155,205,.12); border-radius: 8px; padding: 8px 9px; background: rgba(9,15,26,.44); }
+  .evidence-row:hover { border-color: rgba(68,215,255,.24); }
+  .evidence-path { font: 9px var(--mono); color: var(--cyan); overflow-wrap: anywhere; }
+  .evidence-row.raw .evidence-path { color: var(--amber); }
+  .evidence-text { margin-top: 4px; color: #b8c7db; font-size: 10px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .drawer-backdrop { position: fixed; inset: 0; background: rgba(2,6,12,.72); backdrop-filter: blur(3px); z-index: 80; display: none; }
+  .drawer-backdrop.open { display: block; }
+  .drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(780px, 94vw); z-index: 90;
+    background: #0a111d; border-left: 1px solid rgba(120,155,205,.24); box-shadow: -24px 0 70px rgba(0,0,0,.45);
+    transform: translateX(103%); transition: transform .22s ease; display: flex; flex-direction: column;
+  }
+  .drawer.open { transform: translateX(0); }
+  .drawer-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; padding: 18px 20px; border-bottom: 1px solid var(--line-soft); }
+  .drawer-title { font-size: 17px; font-weight: 740; line-height: 1.3; }
+  .drawer-sub { margin-top: 5px; color: var(--dim); font: 9px/1.55 var(--mono); overflow-wrap: anywhere; }
+  .drawer-body { overflow: auto; padding: 18px 20px 42px; }
+  .drawer-section { margin-bottom: 20px; }
+  .drawer-section h3 { margin: 0 0 9px; color: #cddbee; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+  .drawer-kv { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 7px 10px; font-size: 10px; }
+  .drawer-k { color: var(--dim); font: 9px var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+  .drawer-v { color: #c5d3e6; font: 10px/1.55 var(--mono); overflow-wrap: anywhere; white-space: pre-wrap; }
+  .pre {
+    margin: 0; background: #070c15; border: 1px solid rgba(120,155,205,.14); border-radius: 9px;
+    padding: 10px 11px; color: #b9c9dd; font: 9.5px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere;
+    max-height: 420px; overflow: auto;
+  }
+  .tool-card { border: 1px solid rgba(120,155,205,.14); border-radius: 10px; padding: 10px; margin-bottom: 8px; background: rgba(9,15,26,.44); }
+  .tool-card summary { cursor: pointer; color: #d0deef; font: 10px/1.5 var(--mono); overflow-wrap: anywhere; }
+  .tool-card summary span { color: var(--dim); }
+  .tool-grid { margin-top: 8px; display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 5px 8px; font-size: 9.5px; }
+  .drawer-empty { color: var(--dim); font-size: 10px; padding: 8px 0; }
+  @media (max-width: 1240px) {
+    .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .main-grid { grid-template-columns: 1fr; }
+    .right { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 760px) {
+    main { padding: 20px 14px 36px; }
+    .topbar { padding: 0 16px; }
+    .hero { flex-direction: column; }
+    .hero-meta { align-items: flex-start; }
+    .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .right { display: flex; }
+    .timeline { padding-left: 112px; min-width: 650px; }
+    .lane-label { left: -112px; width: 104px; }
+    .lane-name { font-size: 10px; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><div class="brand-mark">S</div> SESSION STORYBOARD</div>
+  <div class="topbar-right">
+    <span class="pill live" id="environmentPill">● — ENVIRONMENT</span>
+    <span class="pill">HTML · self-contained</span>
+    <span class="pill">playback 1x</span>
+    <button class="btn primary" id="exportBtn" title="导出完整原始证据 JSON">Export JSON</button>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div>
+      <div class="eyebrow" id="heroEyebrow">AGENT SESSION / REPLAY</div>
+      <h1 id="heroTitle">一条会话，<span>拆成可回放的时间线</span></h1>
+      <div class="sub" id="heroSub">从用户发出第一条消息开始，展示每个 Task 的启动、模型首动作、工具调用、沙箱命令、子任务交接、等待、副作用和最终回复。所有位置来自服务端时间戳；缺失数据会显式标注来源。</div>
+    </div>
+    <div class="hero-meta">
+      <div class="status-badge"><span class="status-dot"></span> <span id="heroStatus">COMPLETED</span></div>
+      <div class="meta-line" id="heroSession">session —</div>
+      <div class="meta-line" id="heroWorkspace">workspace —</div>
+      <div class="meta-line" id="heroView">view —</div>
+    </div>
+  </section>
+
+  <section class="kpis" id="kpis"></section>
+
+  <div class="main-grid">
+    <div class="left">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <div class="panel-title">Session Timeline</div>
+            <div class="panel-sub" id="timelineSub">相对时间 · —</div>
+            <div class="panel-sub" id="viewLabel">view: Session</div>
+          </div>
+          <div class="view-switch" id="viewSwitch"></div>
+        </div>
+        <div class="legend">
+          <span class="legend-item"><i class="swatch" style="background:#97a7bd"></i>平台启动/等待</span>
+          <span class="legend-item"><i class="swatch" style="background:#c9b3ff"></i>模型回合</span>
+          <span class="legend-item"><i class="swatch" style="background:#72e7ff"></i>工具执行</span>
+          <span class="legend-item"><i class="swatch" style="background:#71f0be"></i>成员 Task</span>
+          <span class="legend-item"><i class="swatch" style="background:#ffd08a"></i>外部 API</span>
+          <span class="legend-item"><i class="swatch" style="background:#b9c7ff"></i>Artifact</span>
+        </div>
+        <div class="timeline-scroll">
+          <div class="timeline" id="timeline">
+            <div class="ruler" id="ruler"></div>
+            <div id="lanes"></div>
+            <div class="playhead" id="playhead"></div>
+          </div>
+        </div>
+        <div class="transport">
+          <button class="icon-btn" id="playBtn" aria-label="播放">▶</button>
+          <input class="scrub" id="scrub" type="range" min="0" max="369" value="80" step="0.1">
+          <span class="timecode" id="timecode">00:00 / 06:09</span>
+          <select class="speed" id="speed">
+            <option value="1">1x</option>
+            <option value="2">2x</option>
+            <option value="4">4x</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div><div class="panel-title">Rounds</div><div class="panel-sub">每轮用户可见耗时</div></div><div class="panel-sub" id="roundsSub">max —</div></div>
+        <div class="round-list" id="rounds"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div><div class="panel-title">Event Stream</div><div class="panel-sub" id="eventsSub">模型、工具、子任务、artifact、API</div></div><div class="event-tools"><button class="event-filter active" data-filter="key">关键事件</button><button class="event-filter" data-filter="errors">错误</button><button class="event-filter" data-filter="all">全部事件</button></div></div>
+        <div class="panel-body" style="padding:8px 8px 6px">
+          <div class="events-wrap"><table class="events"><thead><tr><th>time</th><th>event</th><th>actor</th><th>duration</th></tr></thead><tbody id="events"></tbody></table></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div><div class="panel-title">Evidence Explorer</div><div class="panel-sub">摘要事件与全量原始证据分层查看</div></div><div class="event-tools"><button class="event-filter active" id="summaryMode">摘要</button><button class="event-filter" id="rawMode">全量证据</button></div></div>
+        <div class="evidence">
+          <div class="evidence-controls">
+            <input class="evidence-input" id="evidenceSearch" placeholder="搜索事件、命令、输出、issue 评论、Task 消息…">
+            <button class="btn" id="evidenceClear">清空</button>
+          </div>
+          <div class="evidence-layer" id="evidenceLayer">当前层：摘要（规范化事件与 Task）</div>
+          <div class="evidence-results" id="evidenceResults"></div>
+        </div>
+      </section>
+    </div>
+
+    <aside class="right">
+      <section class="panel">
+        <div class="panel-head"><div><div class="panel-title">Now Happening</div><div class="panel-sub">播放头位置</div></div><div class="panel-sub" id="nowRound">selection</div></div>
+        <div class="now">
+          <div class="now-time" id="nowTime">00:01:44 / 00:06:09</div>
+          <div class="now-type" id="nowType">MEMBER TASK</div>
+          <div class="now-title" id="nowTitle">诊断专家正在执行 auto --compact</div>
+          <div class="now-detail" id="nowDetail">成员 Task 已启动，模型第一次且唯一一次工具调用已发出。确定性脚本正在遍历本体、内联 IOT，并将结果写回 issue description。</div>
+          <div class="now-actor"><span class="actor-dot" id="nowDot"></span><span id="nowActor">Diagnosis Expert · task 34s</span></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div><div class="panel-title">Sandbox Inspector</div><div class="panel-sub">当前事件的沙箱/外部活动</div></div><div class="panel-sub" id="sandboxOps">1 op</div></div>
+        <div class="sandbox" id="sandbox"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div><div class="panel-title">Tasks</div><div class="panel-sub">每个 Task 可点开查看完整证据</div></div><div class="panel-sub" id="tasksSub">— tasks</div></div>
+        <div class="task-list" id="tasks"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div><div class="panel-title">Errors</div><div class="panel-sub">从输出、消息和评论结构化识别</div></div><div class="panel-sub" id="errorsSub">— errors</div></div>
+        <div class="error-list" id="errors"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div><div class="panel-title">Topology</div><div class="panel-sub" id="topologySub">root issue → children</div></div><div class="panel-sub" id="topologyBadge">native squad</div></div>
+        <div class="topology" id="topology"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div><div class="panel-title">Findings</div><div class="panel-sub">自动识别慢点与风险</div></div><div class="panel-sub" id="findingsSub">— items</div></div>
+        <div class="findings" id="findings"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><div><div class="panel-title">Data Sources</div><div class="panel-sub">缺失数据不会静默补造</div></div></div>
+        <div class="sources" id="sources"></div>
+        <div class="gap-list" id="gaps"></div>
+        <div class="hint" id="sourcesHint">每个 span 都带 <span class="mono">source</span> 与 <span class="mono">confidence</span>；若只有顺序或轮询观测，会明确标注。</div>
+      </section>
+    </aside>
+  </div>
+</main>
+
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
+<aside class="drawer" id="taskDrawer" aria-label="Task detail drawer">
+  <div class="drawer-head">
+    <div><div class="drawer-title" id="drawerTitle">Task</div><div class="drawer-sub" id="drawerSub">—</div></div>
+    <button class="btn" id="drawerClose">关闭</button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<script>
+const DATA = __SESSION_STORY_JSON__;
+const TOTAL = DATA.total;
+/* 示例数据已移除；以下渲染逻辑只消费 Python 生成的 view model。 */
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = (t) => {
+  const m = Math.floor(t / 60), s = Math.floor(t % 60);
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+};
+const pct = (t) => Math.max(0, Math.min(100, t / TOTAL * 100));
+const SESSION_TOTAL = DATA.total;
+let VIEW = { start: 0, end: SESSION_TOTAL };
+const viewDur = () => Math.max(.001, VIEW.end - VIEW.start);
+const vpct = (t) => Math.max(0, Math.min(100, (t - VIEW.start) / viewDur() * 100));
+const local = (t) => Math.max(0, t - VIEW.start);
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+function renderHero() {
+  const h = DATA.hero || {};
+  $('#heroEyebrow').textContent = h.eyebrow || 'AGENT SESSION / REPLAY';
+  $('#heroTitle').innerHTML = `${esc(h.title || '一条会话')}，<span>${esc(h.title_tail || '拆成可回放的时间线')}</span>`;
+  $('#heroTitle').classList.toggle('long', String(h.title || '').length >= 20);
+  $('#heroSub').textContent = h.sub || '';
+  $('#heroStatus').textContent = h.status || 'UNKNOWN';
+  $('#environmentPill').textContent = `● ${h.environment || 'UNKNOWN'} ENVIRONMENT`;
+  $('#heroSession').textContent = h.session_line || 'session —';
+  $('#heroWorkspace').textContent = h.workspace_line || 'workspace —';
+  $('#heroView').textContent = `view ${DATA.default_view || 'session'} · default opens slowest round`;
+  $('#timelineSub').textContent = h.timeline_sub || '';
+  $('#roundsSub').textContent = h.rounds_sub || '';
+  $('#findingsSub').textContent = h.findings_sub || '';
+  $('#topologySub').textContent = DATA.topology_hint || 'root issue → children';
+  $('#topologyBadge').textContent = DATA.topology_badge || 'native squad';
+}
+
+function renderSources() {
+  $('#sources').innerHTML = (DATA.sources || []).map(s => `
+    <div class="source-row"><span>${esc(s.name)}</span><b>${esc(s.detail)}</b></div>
+    <div class="source-bar"><i style="width:${Math.max(0, Math.min(100, +s.pct || 0))}%"></i></div>`).join('');
+  $('#sourcesHint').innerHTML = DATA.sources_hint || '每个 span 都带 source 与 confidence；若只有顺序或轮询观测，会明确标注。';
+  $('#gaps').innerHTML = (DATA.gaps || []).slice(0, 6).map(g => `<div class="gap-item">${esc(g)}</div>`).join('');
+}
+
+function renderKpis() {
+  $('#kpis').innerHTML = DATA.kpis.map(k => `
+    <div class="kpi ${k.cls}">
+      <div class="kpi-label">${esc(k.label)}</div>
+      <div class="kpi-value">${esc(k.value)}<span class="kpi-unit">${esc(k.unit)}</span></div>
+      <div class="kpi-note">${esc(k.note)}</div>
+    </div>`).join('');
+}
+
+function renderViewSwitch() {
+  $('#viewSwitch').innerHTML = (DATA.zoom_ranges || [{id:'session',label:'Session',start:0,end:SESSION_TOTAL}]).map(r => {
+    const active = Math.abs(VIEW.start - +r.start) < .05 && Math.abs(VIEW.end - +r.end) < .05;
+    return `<button class="view-chip ${active?'active':''}" data-view="${esc(r.id)}" title="${esc(r.note || '')}">${esc(r.id === 'session' ? 'Session' : r.id)} · ${esc(fmt(r.end-r.start))}</button>`;
+  }).join('');
+  document.querySelectorAll('#viewSwitch .view-chip').forEach(button => button.onclick = () => setView(button.dataset.view));
+}
+
+function rulerStep(span) {
+  if (span <= 20) return 2;
+  if (span <= 60) return 5;
+  if (span <= 180) return 15;
+  if (span <= 420) return 30;
+  if (span <= 900) return 60;
+  return 120;
+}
+
+function renderRuler() {
+  const ticks = [];
+  const span = viewDur();
+  const step = rulerStep(span);
+  for (let t = 0; t <= span + .001; t += step) {
+    ticks.push(`<div class="tick" style="left:${Math.min(100, t / span * 100)}%"><span>${fmt(t)}</span></div>`);
+  }
+  $('#ruler').innerHTML = ticks.join('');
+}
+
+function renderLanes() {
+  const lanes = (DATA.lanes || []).map(lane => {
+    const visible = lane.spans.filter(s => s.end >= VIEW.start && s.start <= VIEW.end);
+    const spans = visible.map(s => {
+      const start = Math.max(s.start, VIEW.start);
+      const end = Math.min(s.end, VIEW.end);
+      const left = vpct(start);
+      const width = Math.max(.4, vpct(end) - left);
+      const compact = width < 6 ? ' label-off' : '';
+      const taskId = s.task_id || '';
+      return `<div class="span ${esc(s.cls)}${compact}" style="left:${left}%;width:${width}%" title="${esc(s.label)} · ${esc(s.detail)} · ${esc(s.confidence || '')}" data-start="${s.start}" data-end="${s.end}" data-task="${esc(taskId)}" data-label="${esc(s.label)}" data-detail="${esc(s.detail)}" data-actor="${esc(lane.name)}">${esc(s.label)}</div>`;
+    }).join('');
+    const taskId = visible.map(s => s.task_id).find(Boolean) || (lane.task_ids || [])[0] || '';
+    return `<div class="lane" data-task="${esc(taskId)}">
+      <div class="lane-label" data-task="${esc(taskId)}"><div class="lane-name">${esc(lane.name)}</div><div class="lane-kind">${esc(lane.kind)}</div></div>
+      <div class="lane-track">${spans}</div>
+    </div>`;
+  }).join('');
+  $('#lanes').innerHTML = lanes || '<div class="drawer-empty" style="padding:20px">当前视图没有可显示的 Task span。</div>';
+  document.querySelectorAll('#lanes .span').forEach(span => {
+    span.onclick = () => updateNow(+span.dataset.start + .2);
+    span.ondblclick = () => { if (span.dataset.task) openTask(span.dataset.task); };
+  });
+  document.querySelectorAll('#lanes .lane-label').forEach(label => {
+    label.onclick = () => { if (label.dataset.task) openTask(label.dataset.task); };
+  });
+}
+
+function renderRounds() {
+  $('#rounds').innerHTML = DATA.rounds.length ? DATA.rounds.map((r, i) => {
+    const active = Math.abs(VIEW.start - +r.start) < .05 && Math.abs(VIEW.end - +r.end) < .05;
+    return `<div class="round ${active?'active':''}" data-view="${esc(r.id)}" data-start="${r.start}" data-end="${r.end}">
+      <div><div class="round-name">${esc(r.id)} · ${esc(r.label)}</div><div class="round-meta">${esc(r.note)}</div></div>
+      <div class="round-time">${(r.end-r.start).toFixed(1)}s</div>
+    </div>`;
+  }).join('') : '<div class="drawer-empty" style="padding:16px 18px">没有可识别的用户轮次。</div>';
+  document.querySelectorAll('.round').forEach(row => row.onclick = () => setView(row.dataset.view));
+}
+
+let eventFilter = 'key';
+let searchQuery = '';
+let currentViewId = 'session';
+const HAYSTACK = new Map();
+function eventHaystack(e) {
+  if (HAYSTACK.has(e.id)) return HAYSTACK.get(e.id);
+  const s = e.sandbox || {};
+  const value = [e.title, e.detail, e.actor, e.task_title, e.task_id, e.round_id, e.id, s.cmd, s.cwd, s.result_output, e.error && e.error.summary].join(' ').toLowerCase();
+  HAYSTACK.set(e.id, value);
+  return value;
+}
+
+function renderEvents() {
+  const spanStart = VIEW.start - .5, spanEnd = VIEW.end + .5;
+  const inView = (e) => (e.t >= spanStart && e.t <= spanEnd) || (e.end_t != null && e.end_t >= spanStart && e.t <= spanEnd);
+  let selected = DATA.events.filter(inView);
+  if (eventFilter === 'key') selected = selected.filter(e => e.key);
+  if (eventFilter === 'errors') selected = selected.filter(e => e.type === 'ERROR' || (e.error && e.error.category));
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    selected = selected.filter(e => eventHaystack(e).includes(q));
+  }
+  const stats = DATA.event_stats || {key:selected.length, all:DATA.events.length};
+  $('#eventsSub').textContent = `${selected.length} / ${stats.all} events · view ${currentViewId} · ${fmt(0)}–${fmt(viewDur())} · ${searchQuery ? 'search active' : 'click to seek, double-click task'}`;
+  $('#events').innerHTML = [...selected].sort((a,b)=>b.t-a.t).map(e => {
+    const error = e.type === 'ERROR' || (e.error && e.error.category);
+    const category = e.error ? `<span class="tag error">${esc(e.error.severity || 'error')}</span> ${esc(e.error.label || e.error.category)}` : '';
+    const task = e.task_title ? `<div class="event-detail">task：${esc(e.task_title)}</div>` : '';
+    return `<tr data-t="${e.t}" data-task="${esc(e.task_id || '')}" class="${error?'event-error':''}">
+      <td class="event-time">${fmt(local(e.t))}</td>
+      <td><div class="event-title">${esc(e.title)}</div>${category?`<div class="event-detail">${category}</div>`:''}<div class="event-detail">${esc(e.detail)}</div>${task}</td>
+      <td><span class="tag ${esc(e.cls)}">${esc(e.actor)}</span></td>
+      <td class="event-time">${esc(e.dur)}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="4" class="dim" style="padding:16px">当前筛选没有事件。</td></tr>';
+  document.querySelectorAll('#events tr[data-t]').forEach(row => {
+    row.onclick = () => updateNow(local(+row.dataset.t) + VIEW.start + .1);
+    row.ondblclick = () => { if (row.dataset.task) openTask(row.dataset.task); };
+  });
+}
+
+function renderTopology() {
+  $('#topology').innerHTML = DATA.topology.map((n, i) => `
+    ${i ? '<div class="node-line"></div>' : ''}
+    <div class="node ${esc(n.kind)}"><div class="node-icon">${esc(n.icon)}</div><div><div class="node-title">${esc(n.title)}</div><div class="node-meta">${esc(n.meta)}</div></div></div>`).join('');
+}
+
+function renderFindings() {
+  $('#findings').innerHTML = DATA.findings.map(f => `
+    <div class="finding ${esc(f.kind)}"><div class="finding-icon">${f.kind==='good'?'✓':'!'}</div><div><div class="finding-title">${esc(f.title)}</div><div class="finding-desc">${esc(f.desc)}</div></div></div>`).join('');
+}
+
+function currentEvent(t) {
+  let found = null;
+  for (const e of DATA.events) {
+    if (e.t <= t && e.t >= VIEW.start - .5) found = e;
+    if (e.t > t) break;
+  }
+  return found || DATA.events.find(e => e.t >= VIEW.start) || DATA.events[0] || {type:'—', title:'无事件', detail:'', actor:'—', dur:'—'};
+}
+
+function renderSandbox(e) {
+  const s = e.sandbox;
+  if (!s) {
+    $('#sandboxOps').textContent = '0 ops';
+    $('#sandbox').className = 'sandbox-empty';
+    $('#sandbox').innerHTML = '这个时间点没有直接沙箱命令。平台启动、成员等待、用户输入和最终回复只显示在事件流中。';
+    return;
+  }
+  $('#sandboxOps').textContent = '1 op';
+  $('#sandbox').className = 'sandbox';
+  $('#sandbox').innerHTML = `
+    <div class="sandbox-row"><div class="sandbox-k">command</div><div class="sandbox-v mono">${esc(s.cmd || '—')}</div></div>
+    <div class="sandbox-row"><div class="sandbox-k">cwd</div><div class="sandbox-v mono">${esc(s.cwd || 'not captured')}</div></div>
+    <div class="sandbox-row"><div class="sandbox-k">activity</div><div class="sandbox-v">${esc(s.io || '—')}</div></div>
+    <div class="sandbox-row"><div class="sandbox-k">files</div><div class="sandbox-chips">${(s.files || []).length ? s.files.map(f => `<span class="sandbox-chip">${esc(f)}</span>`).join('') : '<span class="sandbox-chip warn">none captured</span>'}</div></div>
+    <div class="sandbox-row"><div class="sandbox-k">network</div><div class="sandbox-chips">${(s.network || s.net || []).length ? (s.network || s.net).map(n => `<span class="sandbox-chip">${esc(n)}</span>`).join('') : '<span class="sandbox-chip warn">none captured</span>'}</div></div>
+    <div class="sandbox-row"><div class="sandbox-k">status</div><div class="sandbox-v"><span class="sandbox-chip ok">${esc(s.status || 'not captured')}</span></div></div>
+    <div class="sandbox-row"><div class="sandbox-k">exit</div><div class="sandbox-v"><span class="sandbox-chip ${s.exit === 'not captured' ? 'warn' : 'ok'}">${esc(s.exit || 'not captured')}</span></div></div>
+    <div class="sandbox-row"><div class="sandbox-k">result</div><div class="sandbox-v mono">${esc((s.result_output || '').slice(0, 900) || (s.result_observed ? 'observed empty output' : 'not captured'))}</div></div>
+    <div class="sandbox-foot">摘要区只展示截断结果；点开 Task 抽屉或导出 JSON 查看完整 result_output。缺失 cwd/exit 显示 not captured，不用 0 或 completed 冒充。</div>`;
+}
+
+function updateNow(t) {
+  t = clamp(t, VIEW.start, VIEW.end);
+  const e = currentEvent(t);
+  const activeRound = DATA.rounds.find(r => t >= r.start && t <= r.end) || DATA.rounds[DATA.rounds.length-1] || {id:'—'};
+  $('#nowTime').textContent = `${fmt(local(t))} / ${fmt(viewDur())}`;
+  $('#nowRound').textContent = activeRound.id;
+  $('#nowType').textContent = e.type;
+  $('#nowTitle').textContent = e.title;
+  $('#nowDetail').textContent = e.detail + (e.task_title ? ` · task ${e.task_title}` : '') + (e.error ? ` · ${e.error.label}` : '');
+  $('#nowActor').textContent = e.actor + (e.dur !== '—' ? ` · ${e.dur}` : '');
+  renderSandbox(e);
+  const color = {member:'#4be0a1', tool:'#44d7ff', external:'#ffb454', artifact:'#b38cff', error:'#ff6b81'}[e.cls] || '#44d7ff';
+  $('#nowDot').style.background = color;
+  $('#nowDot').style.boxShadow = `0 0 10px ${color}`;
+  const left = vpct(t);
+  $('#playhead').style.left = `calc(156px + (100% - 156px) * ${left / 100})`;
+  $('#scrub').value = t;
+  $('#timecode').textContent = `${fmt(local(t))} / ${fmt(viewDur())}`;
+  document.querySelectorAll('.round').forEach(r => {
+    const on = Math.abs(VIEW.start - +r.dataset.start) < .05 && Math.abs(VIEW.end - +r.dataset.end) < .05;
+    r.classList.toggle('active', on);
+  });
+}
+
+let playing = false, raf = null, last = null;
+function loop(ts) {
+  if (!playing) return;
+  if (!last) last = ts;
+  const speed = +$('#speed').value;
+  let t = +$('#scrub').value + (ts - last) / 1000 * speed;
+  last = ts;
+  if (t >= VIEW.end) { t = VIEW.end; playing = false; $('#playBtn').textContent = '↻'; }
+  updateNow(t);
+  if (playing) raf = requestAnimationFrame(loop);
+}
+
+function resetAndPlay() {
+  if (playing) {
+    playing = false;
+    $('#playBtn').textContent = '▶';
+    if (raf) cancelAnimationFrame(raf);
+    return;
+  }
+  if (+$('#scrub').value >= VIEW.end - .1) updateNow(VIEW.start);
+  playing = true;
+  last = null;
+  $('#playBtn').textContent = '❚❚';
+  raf = requestAnimationFrame(loop);
+}
+
+const EVENT_BY_ID = new Map((DATA.events || []).map(e => [e.id, e]));
+let evidenceMode = 'summary';
+let RAW_INDEX = null;
+
+function fmtDur(ms) {
+  if (ms == null) return '—';
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function statusClass(status) {
+  const value = String(status || '').toLowerCase();
+  if (['failed', 'error', 'cancelled'].includes(value)) return 'failed';
+  if (['running', 'queued', 'claimed', 'in_progress', 'starting'].includes(value)) return 'running';
+  return '';
+}
+
+function renderTasks() {
+  const tasks = DATA.tasks_detail || [];
+  const stats = DATA.task_stats || {};
+  $('#tasksSub').textContent = `${tasks.length} tasks · ${stats.leader || 0} leader · ${stats.member || 0} member`;
+  $('#tasks').innerHTML = tasks.map(task => {
+    const tools = (task.tool_event_ids || []).length;
+    const errors = (task.error_event_ids || []).length;
+    return `<div class="task-row" data-task="${esc(task.id)}">
+      <div class="task-head"><div class="task-title">${esc(task.kind)} · ${esc(task.title)}</div><div class="task-status ${statusClass(task.status)}">${esc(task.status)}</div></div>
+      <div class="task-meta">${esc(task.agent_name)} · ${esc(task.round_id || 'unmapped')} · ${fmtDur(task.duration_ms)} · ${tools} tools${errors ? ` · ${errors} errors` : ''}<br>${esc(task.short_id)} · ${esc(task.issue_id || 'no issue')}</div>
+    </div>`;
+  }).join('') || '<div class="drawer-empty" style="padding:8px 16px">没有 Task 详情。</div>';
+  document.querySelectorAll('#tasks .task-row').forEach(row => row.onclick = () => openTask(row.dataset.task));
+}
+
+function renderErrors() {
+  const errors = DATA.errors || [];
+  $('#errorsSub').textContent = `${errors.length} errors`;
+  $('#errors').innerHTML = errors.map(error => `
+    <div class="error-row ${error.severity === 'warning' ? 'warning' : ''}" data-t="${error.t}" data-task="${esc(error.task_id || '')}">
+      <div class="error-cat">${esc(error.severity)} · ${esc(error.category)} · ${esc(error.round_id || '—')} · ${esc(error.actor)}</div>
+      <div class="error-line">${esc(error.line || error.label)}</div>
+    </div>`).join('') || '<div class="drawer-empty" style="padding:8px 16px">没有识别到结构化错误。</div>';
+  document.querySelectorAll('#errors .error-row').forEach(row => row.onclick = () => goToEvent(+row.dataset.t, row.dataset.task));
+}
+
+function buildRawIndex() {
+  if (RAW_INDEX) return RAW_INDEX;
+  const out = [];
+  const walk = (value, path) => {
+    if (typeof value === 'string') {
+      if (value.trim()) out.push({ path, text: value });
+      return;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      out.push({ path, text: String(value) });
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => walk(item, `${path}[${index}]`));
+      return;
+    }
+    if (value && typeof value === 'object') {
+      Object.entries(value).forEach(([key, item]) => walk(item, path ? `${path}.${key}` : key));
+    }
+  };
+  walk(DATA.raw_evidence || {}, 'raw_evidence');
+  RAW_INDEX = out;
+  return out;
+}
+
+function summaryRows(query) {
+  const q = String(query || '').toLowerCase();
+  const rows = [];
+  for (const error of DATA.errors || []) {
+    const text = `${error.label} · ${error.line}`;
+    if (q && !text.toLowerCase().includes(q)) continue;
+    rows.push({ kind: 'error', path: `error:${error.category} · ${error.round_id || '—'} · ${error.task_id ? error.task_id.slice(0,8) : '—'}`, text, t: error.t, task: error.task_id });
+  }
+  for (const event of DATA.events || []) {
+    if (!q && !event.key) continue;
+    if (q && !eventHaystack(event).includes(q)) continue;
+    rows.push({ kind: 'event', path: `event:${event.id} · ${event.round_id || '—'} · ${event.task_id ? event.task_id.slice(0,8) : '—'}`, text: `${event.title} — ${event.detail}`, t: event.t, task: event.task_id });
+    if (rows.length > 900) break;
+  }
+  for (const task of DATA.tasks_detail || []) {
+    const text = `${task.title} · ${task.agent_name} · ${task.prompt || ''}`;
+    if (q && !text.toLowerCase().includes(q)) continue;
+    rows.push({ kind: 'task', path: `task:${task.short_id} · ${task.agent_name} · ${task.round_id || '—'}`, text: `${task.title} — ${String(task.prompt || '').slice(0, 600)}`, t: null, task: task.id });
+  }
+  return q ? rows.slice(0, 300) : rows.filter(row => row.kind !== 'event').concat(rows.filter(row => row.kind === 'event').slice(-40).reverse()).slice(0, 120);
+}
+
+function renderEvidence() {
+  const layer = $('#evidenceLayer');
+  const results = $('#evidenceResults');
+  $('#summaryMode').classList.toggle('active', evidenceMode === 'summary');
+  $('#rawMode').classList.toggle('active', evidenceMode === 'raw');
+  if (evidenceMode === 'summary') {
+    const rows = summaryRows(searchQuery);
+    layer.className = 'evidence-layer';
+    layer.textContent = `当前层：摘要（规范化事件 + Task + 结构化错误）· 全会话范围 · ${rows.length} 行`;
+    results.innerHTML = rows.map(row => `
+      <div class="evidence-row" data-t="${row.t == null ? '' : row.t}" data-task="${esc(row.task || '')}">
+        <div class="evidence-path">${esc(row.path)}</div>
+        <div class="evidence-text">${esc(String(row.text || '').slice(0, 700))}</div>
+      </div>`).join('') || '<div class="drawer-empty">没有匹配的摘要证据。</div>';
+    document.querySelectorAll('#evidenceResults .evidence-row').forEach(row => {
+      row.onclick = () => {
+        const t = row.dataset.t === '' ? null : +row.dataset.t;
+        if (t != null) goToEvent(t, row.dataset.task);
+        else if (row.dataset.task) openTask(row.dataset.task);
+      };
+    });
+    return;
+  }
+  const index = buildRawIndex();
+  const q = String(searchQuery || '').toLowerCase();
+  layer.className = 'evidence-layer raw';
+  if (!q) {
+    layer.textContent = `当前层：全量证据（原始 JSON）· 已嵌入 ${index.length} 条字符串叶子 · 输入关键词搜索，导出按钮始终导出完整 JSON`;
+    results.innerHTML = '<div class="drawer-empty">全量模式不默认渲染所有行，避免浏览器卡顿。输入关键词即可检索 session messages、run events、task messages、task detail、issue 评论和 artifacts。</div>';
+    return;
+  }
+  const matches = [];
+  for (const row of index) {
+    if (row.text.toLowerCase().includes(q)) matches.push(row);
+    if (matches.length >= 300) break;
+  }
+  layer.textContent = `当前层：全量证据（原始 JSON）· 命中 ${matches.length}${matches.length >= 300 ? '+' : ''} / ${index.length} 条字符串叶子`;
+  results.innerHTML = matches.map(row => `
+    <div class="evidence-row raw">
+      <div class="evidence-path">${esc(row.path)}</div>
+      <div class="evidence-text">${esc(row.text.slice(0, 900))}</div>
+    </div>`).join('') || '<div class="drawer-empty">没有匹配的原始证据。</div>';
+}
+
+function setView(rangeId, seek) {
+  const range = (DATA.zoom_ranges || []).find(item => item.id === rangeId) || { id: 'session', start: 0, end: SESSION_TOTAL, note: '' };
+  VIEW = { start: +range.start || 0, end: +range.end || SESSION_TOTAL };
+  currentViewId = rangeId;
+  if (VIEW.end <= VIEW.start) VIEW.end = VIEW.start + 1;
+  $('#viewLabel').textContent = `view: ${rangeId === 'session' ? 'Session' : rangeId} · ${fmt(VIEW.end - VIEW.start)}`;
+  $('#heroView').textContent = `view ${rangeId} · ${range.note || ''}`;
+  $('#scrub').min = VIEW.start;
+  $('#scrub').max = VIEW.end;
+  renderViewSwitch();
+  renderRuler();
+  renderLanes();
+  renderRounds();
+  renderEvents();
+  const target = seek == null ? (rangeId === 'session' ? 0 : VIEW.start) : seek;
+  updateNow(target);
+}
+
+function goToEvent(t, taskId) {
+  const round = (DATA.rounds || []).find(item => t >= item.start - .01 && t <= item.end + .01);
+  if (round && (t < VIEW.start || t > VIEW.end)) setView(round.id, t);
+  else updateNow(t);
+  if (taskId) openTask(taskId);
+}
+
+function kv(label, value) {
+  return `<div class="drawer-k">${esc(label)}</div><div class="drawer-v">${esc(value == null || value === '' ? 'not captured' : value)}</div>`;
+}
+
+function openTask(taskId) {
+  const task = (DATA.tasks_detail || []).find(item => item.id === taskId);
+  if (!task) return;
+  $('#drawerTitle').textContent = `${task.kind} · ${task.title}`;
+  $('#drawerSub').textContent = `${task.short_id} · ${task.agent_name} · ${task.round_id || 'unmapped'} · ${task.status}`;
+  const tools = (task.tool_event_ids || []).map(id => EVENT_BY_ID.get(id)).filter(Boolean);
+  const errors = (task.error_event_ids || []).map(id => EVENT_BY_ID.get(id)).filter(Boolean);
+  const artifacts = (DATA.artifacts || []).filter(item => (task.artifact_ids || []).includes(item.id));
+  const lifecycle = (task.lifecycle || []).map(item => `<div class="drawer-k">${esc(item.label)}</div><div class="drawer-v">${esc(item.ts || 'not captured')}${item.detail ? ` · ${esc(item.detail)}` : ''}</div>`).join('');
+  const outputs = (task.outputs || []).map(item => `<pre class="pre">${esc(item.content)}</pre>`).join('') || '<div class="drawer-empty">没有可见中间输出。</div>';
+  const toolHtml = tools.map(event => {
+    const s = event.sandbox || {};
+    return `<details class="tool-card">
+      <summary>#${esc(s.seq ?? '—')} · ${esc(s.tool || event.title)} · ${esc(s.status || 'not captured')} · ${fmtDur(event.dur_s == null ? null : event.dur_s * 1000)}<br><span>${esc(s.cmd_excerpt || s.cmd || event.title)}</span></summary>
+      <div class="tool-grid">
+        ${kv('start', event.ts || 'not captured')}
+        ${kv('end', event.end_t == null ? 'not captured' : `${event.end_t.toFixed(3)}s · ${fmt(event.end_t)}`)}
+        ${kv('cwd', s.cwd || 'not captured')}
+        ${kv('status', s.status || 'not captured')}
+        ${kv('exit', s.exit || 'not captured')}
+        ${kv('command', s.cmd || 'not captured')}
+      </div>
+      <pre class="pre">${esc(s.result_output || (s.result_observed ? 'observed empty output' : 'not captured'))}</pre>
+    </details>`;
+  }).join('') || '<div class="drawer-empty">没有工具调用。</div>';
+  const errorHtml = errors.map(event => `<div class="error-row ${event.error && event.error.severity === 'warning' ? 'warning' : ''}"><div class="error-cat">${esc((event.error || {}).severity || 'error')} · ${esc((event.error || {}).category || 'unknown')}</div><div class="error-line">${esc((event.error || {}).line || event.detail)}</div></div>`).join('') || '<div class="drawer-empty">没有结构化错误。</div>';
+  const artifactHtml = artifacts.map(item => `<div class="drawer-v">${esc(item.name || item.id)} · ${esc(item.size == null ? 'size not captured' : item.size)} · ${esc(item.created_at || '')}</div>`).join('') || '<div class="drawer-empty">没有 artifact。</div>';
+  $('#drawerBody').innerHTML = `
+    <section class="drawer-section"><h3>Overview</h3><div class="drawer-kv">
+      ${kv('task id', task.id)}
+      ${kv('agent', `${task.agent_name}${task.agent_version ? ` · v${task.agent_version}` : ''}`)}
+      ${kv('status', task.status)}
+      ${kv('round', `${task.round_id || 'unmapped'} · ${task.round_label || ''}`)}
+      ${kv('duration', fmtDur(task.duration_ms))}
+      ${kv('issue', `${task.identifier || ''} ${task.issue_id || ''}`.trim())}
+      ${kv('runtime', task.runtime_name)}
+      ${kv('parent', task.parent_task_id)}
+      ${kv('failure', task.failure_reason)}
+      ${kv('raw messages', String(task.raw_message_count || 0))}
+    </div></section>
+    <section class="drawer-section"><h3>Lifecycle</h3><div class="drawer-kv">${lifecycle || '<div class="drawer-empty">not captured</div>'}</div></section>
+    <section class="drawer-section"><h3>Prompt</h3><pre class="pre">${esc(task.prompt || 'not captured')}</pre></section>
+    <section class="drawer-section"><h3>Visible outputs</h3>${outputs}</section>
+    <section class="drawer-section"><h3>Tools (${tools.length})</h3>${toolHtml}</section>
+    <section class="drawer-section"><h3>Errors (${errors.length})</h3>${errorHtml}</section>
+    <section class="drawer-section"><h3>Artifacts (${artifacts.length})</h3>${artifactHtml}</section>
+    <section class="drawer-section"><h3>Usage / attempts</h3><pre class="pre">${esc(JSON.stringify({usage: task.usage || {}, attempts: task.attempts || []}, null, 2))}</pre></section>`;
+  $('#taskDrawer').classList.add('open');
+  $('#drawerBackdrop').classList.add('open');
+}
+
+function closeTask() {
+  $('#taskDrawer').classList.remove('open');
+  $('#drawerBackdrop').classList.remove('open');
+}
+
+function exportJson() {
+  const payload = {
+    schema_version: DATA.schema_version,
+    exported_at: new Date().toISOString(),
+    environment: DATA.hero && DATA.hero.environment,
+    session: DATA.hero && DATA.hero.session_line,
+    workspace: DATA.hero && DATA.hero.workspace_line,
+    errors: DATA.errors || [],
+    tasks: DATA.tasks_detail || [],
+    events: DATA.events || [],
+    raw_evidence: DATA.raw_evidence || {},
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const session = String((DATA.hero && DATA.hero.session_line) || 'session').replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 80);
+  a.href = url;
+  a.download = `${session}-evidence.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function init() {
+  renderHero();
+  renderKpis();
+  renderTasks();
+  renderErrors();
+  renderTopology();
+  renderFindings();
+  renderSources();
+  renderEvidence();
+  $('#playBtn').onclick = resetAndPlay;
+  $('#scrub').oninput = (event) => updateNow(+event.target.value);
+  document.querySelectorAll('.event-filter[data-filter]').forEach(button => button.onclick = () => {
+    eventFilter = button.dataset.filter;
+    document.querySelectorAll('.event-filter[data-filter]').forEach(item => item.classList.toggle('active', item === button));
+    renderEvents();
+  });
+  $('#summaryMode').onclick = () => { evidenceMode = 'summary'; renderEvidence(); };
+  $('#rawMode').onclick = () => { evidenceMode = 'raw'; renderEvidence(); };
+  $('#evidenceSearch').oninput = (event) => { searchQuery = event.target.value.trim(); renderEvents(); renderEvidence(); };
+  $('#evidenceClear').onclick = () => { searchQuery = ''; $('#evidenceSearch').value = ''; renderEvents(); renderEvidence(); };
+  $('#exportBtn').onclick = exportJson;
+  $('#drawerClose').onclick = closeTask;
+  $('#drawerBackdrop').onclick = closeTask;
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeTask(); });
+  setView(DATA.default_view || 'session');
+}
+
+init();
+</script>
+</body>
+</html>

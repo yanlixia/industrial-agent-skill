@@ -104,7 +104,17 @@ DeepWorks test：
 
 完整清单见 `references/checklist.md`。
 
-## 七、产物
+## 七、性能反馈闭环
+
+本 Skill 与 `session-storyboard` 同仓分发。用 storyboard 分析真实 DeepWorks 会话后，只有满足其 `references/feedback-loop.md` 门槛的通用性能经验才允许反哺到本 Skill。
+
+- 改进本 Skill 前先搜索 `yanlixia/industrial-agent-skill` 上带 `session-storyboard-feedback-id` 的 open issue。
+- 每个被采纳的反馈必须落到 `scaffold`、契约、参考文档或测试中的至少一处；只改散文提示词不算消化。
+- 同一反馈对应的模板、运行时脚本、doctor / unittest 验收必须同批修改。
+- 关闭反馈 issue 时说明落点文件和验证结果；重复指纹的 issue 应标记为 duplicate 并只保留一个处理线。
+- 用户明确要求自动反馈时，必须先展示候选清单并取得逐项确认，再调用 `session-storyboard/scripts/feedback_issue.py`。
+
+## 八、产物
 
 一个可落地的仓库骨架，包含：
 
