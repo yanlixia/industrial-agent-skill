@@ -11,21 +11,24 @@
 #
 # What it does:
 #   0. when piped (no local repo), clones the repo to a temp cache first
-#   1. installs the skill (SKILL.md + references + scaffold + generator tools) into
-#      ~/.agents/skills/industrial-agent-builder/  (the cross-CLI convention dir)
-#   2. links it for Claude Code at ~/.claude/skills/industrial-agent-builder
+#   1. installs industrial-agent-builder and session-storyboard into
+#      ~/.agents/skills/  (the cross-CLI convention dir)
+#   2. links them for Claude Code at ~/.claude/skills/
 #      (skip with SKIP_CLAUDE_LINK=1)
 #   3. optionally adds tools/ to PATH via ~/.agents/bin (skip with SKIP_TOOLS_PATH=1)
-#   4. verifies: python3 runs state_roundtrip.py self-test
+#   4. verifies: scaffold tooling and session-storyboard self-tests
 #
 # Idempotent: re-running updates in place. Never deletes other skills.
 set -euo pipefail
 
 REPO_URL="https://github.com/yanlixia/industrial-agent-skill.git"
 SKILL_NAME="industrial-agent-builder"
+STORYBOARD_NAME="session-storyboard"
 TARGET_BASE="${HOME}/.agents/skills"
 TARGET="${TARGET_BASE}/${SKILL_NAME}"
+STORYBOARD_TARGET="${TARGET_BASE}/${STORYBOARD_NAME}"
 LINK="${HOME}/.claude/skills/${SKILL_NAME}"
+STORYBOARD_LINK="${HOME}/.claude/skills/${STORYBOARD_NAME}"
 BIN_DIR="${HOME}/.agents/bin"
 
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
@@ -45,6 +48,7 @@ else
   REPO_DIR="${CACHE}"
 fi
 [ -f "${REPO_DIR}/skill/SKILL.md" ] || die "repo layout unexpected: skill/SKILL.md missing in ${REPO_DIR}"
+[ -f "${REPO_DIR}/session-storyboard/SKILL.md" ] || die "repo layout unexpected: session-storyboard/SKILL.md missing in ${REPO_DIR}"
 
 say "installing skill to ${TARGET}"
 mkdir -p "${TARGET_BASE}"
@@ -53,11 +57,17 @@ cp -R "${REPO_DIR}/skill/." "${TARGET}/"
 mkdir -p "${TARGET}/tools"
 cp -R "${REPO_DIR}/tools/." "${TARGET}/tools/"
 
+say "installing companion skill to ${STORYBOARD_TARGET}"
+rm -rf "${STORYBOARD_TARGET}"
+cp -R "${REPO_DIR}/session-storyboard" "${STORYBOARD_TARGET}"
+
 if [ "${SKIP_CLAUDE_LINK:-0}" != "1" ]; then
   if [ -d "${HOME}/.claude/skills" ]; then
-    say "linking for Claude Code at ${LINK}"
+    say "linking skills for Claude Code at ${LINK} and ${STORYBOARD_LINK}"
     rm -rf "${LINK}"
     ln -s "../../.agents/skills/${SKILL_NAME}" "${LINK}"
+    rm -rf "${STORYBOARD_LINK}"
+    ln -s "../../.agents/skills/${STORYBOARD_NAME}" "${STORYBOARD_LINK}"
   else
     say "~/.claude/skills not found; skipping Claude Code link (other CLIs read ~/.agents/skills)"
   fi
@@ -79,10 +89,12 @@ fi
 say "verifying toolchain (self-tests)"
 python3 "${REPO_DIR}/tools/state_roundtrip.py" >/dev/null || die "state_roundtrip self-test failed"
 python3 "${TARGET}/tools/scaffold.py" --help >/dev/null || die "scaffold generator self-test failed"
+python3 -m unittest discover -s "${STORYBOARD_TARGET}/tests" >/dev/null || die "session-storyboard self-test failed"
 say "self-tests passed"
 
 say "done. usage:"
 echo "  - in your agent CLI: mention '工业智能体' / 'industrial agent' — the skill triggers"
+echo "  - session replay: mention '会话回放' / '分析为什么这轮慢' — session-storyboard triggers"
 echo "  - tools now on PATH (after reload): check_marker_contract  validate_reply  state_roundtrip  remote_probe"
 echo "  - scaffold a single expert: python3 ${TARGET}/tools/scaffold.py --mode single --domain <domain> --title '<title>' --target ./my-expert"
 echo "  - scaffold an expert team:  python3 ${TARGET}/tools/scaffold.py --mode team --domain <domain> --title '<title>' --roles role1,role2 --target ./my-team"
