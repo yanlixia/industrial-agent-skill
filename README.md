@@ -28,6 +28,8 @@ bash install.sh
 
 `session-storyboard` 用于还原真实会话、定位耗时和副作用证据；它发现的跨领域性能经验可以在用户逐项确认后反哺本仓库。
 
+安装时会写入 `installed.json`，记录安装 commit。任一 skill 被触发时会先做只读版本检查；发现 GitHub `main` 有新版本时，必须向用户确认，用户同意后才更新。默认没有静默自动更新。
+
 ### 单专家
 
 ```bash
@@ -115,6 +117,20 @@ python3 ~/.agents/skills/session-storyboard/scripts/feedback_issue.py \
 
 无 `gh`、未登录或用户未逐项确认时不创建 issue。完整规则见 `session-storyboard/references/feedback-loop.md`。
 
+## 版本检查与更新
+
+```bash
+python3 ~/.agents/skills/industrial-agent-builder/scripts/check_update.py
+```
+
+该命令只读取 GitHub `main` 的当前 commit 并与 `installed.json` 比较，不修改本地文件。状态为 `update_available` 时，agent 必须先请求用户确认；确认后才执行：
+
+```bash
+python3 ~/.agents/skills/industrial-agent-builder/scripts/check_update.py --apply --yes
+```
+
+`--yes` 只用于承接用户已经给出的明确同意，不能代替确认对话。更新会重新运行官方安装器，并同时更新两个 skill。网络检查失败时，本地 skill 仍可继续使用。
+
 ## 仓库结构
 
 ```text
@@ -126,6 +142,7 @@ tools/scaffold.py               # 单专家/专家团生成器
 tools/runtime.py                # 生成物共用的 DeepWorks runtime
 tools/validate_reply.py         # 回复验收门
 tools/check_marker_contract.py  # marker 一致性 lint
+tools/check_update.py           # 版本检查与确认更新入口
 tools/state_roundtrip.py        # 状态往返契约 harness
 tools/remote_probe.py           # test 环境回放探针
 docs/PITFALLS.md                # 已实证坑与规避

@@ -9,8 +9,10 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 STORYBOARD_SCRIPTS = ROOT / "session-storyboard" / "scripts"
 sys.path.insert(0, str(STORYBOARD_SCRIPTS))
+sys.path.insert(0, str(ROOT / "tools"))
 
 import feedback_issue
+import check_update
 
 
 CANDIDATE = {
@@ -130,7 +132,45 @@ class BundleInstallTests(unittest.TestCase):
         self.assertIn('STORYBOARD_NAME="session-storyboard"', installer)
         self.assertIn('"${STORYBOARD_TARGET}/tests"', installer)
         self.assertIn('"${STORYBOARD_LINK}"', installer)
+        self.assertIn('"${TARGET}/scripts/check_update.py"', installer)
+        self.assertIn('"${STORYBOARD_TARGET}/scripts/check_update.py"', installer)
+        self.assertIn('"${TARGET}/installed.json"', installer)
+        self.assertIn('"${STORYBOARD_TARGET}/installed.json"', installer)
         self.assertTrue((ROOT / "session-storyboard" / "references" / "feedback-loop.md").is_file())
+
+
+class UpdateCheckTests(unittest.TestCase):
+    def test_reports_current_and_update_available_without_side_effects(self):
+        metadata = {
+            "schema": check_update.INSTALL_SCHEMA,
+            "repository": check_update.REPO,
+            "commit": "1" * 40,
+        }
+        with patch.object(check_update, "remote_commit", return_value="1" * 40):
+            current = check_update.check(metadata)
+        self.assertEqual(current["status"], "current")
+
+        with patch.object(check_update, "remote_commit", return_value="2" * 40):
+            available = check_update.check(metadata)
+        self.assertEqual(available["status"], "update_available")
+        self.assertEqual(available["local_commit"], "1" * 40)
+        self.assertEqual(available["remote_commit"], "2" * 40)
+        self.assertIn("--apply --yes", available["apply_command"])
+
+    def test_declined_update_does_not_clone_or_install(self):
+        with patch.object(check_update, "remote_commit", return_value="2" * 40), \
+             patch.object(check_update, "_confirm", return_value=False), \
+             patch.object(check_update, "_run", side_effect=AssertionError("update must stop after decline")):
+            result = check_update.apply_update(assumed_yes=False)
+        self.assertEqual(result["status"], "declined")
+        self.assertEqual(result["remote_commit"], "2" * 40)
+
+    def test_rejects_invalid_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "installed.json"
+            path.write_text("{}", encoding="utf-8")
+            with self.assertRaises(check_update.UpdateError):
+                check_update.read_metadata(path)
 
 
 if __name__ == "__main__":

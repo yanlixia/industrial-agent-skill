@@ -5,6 +5,22 @@ description: 把任意专家或专家团的真实会话还原成可播放的 HTM
 
 # Session Storyboard
 
+## 版本检查
+
+采集或分析会话前，先运行：
+
+```bash
+SKILL_DIR="$HOME/.agents/skills/session-storyboard"
+python3 "$SKILL_DIR/scripts/check_update.py"
+```
+
+- `status=current`：继续当前任务。
+- `status=update_available`：向用户展示本地 commit、远端 commit，并询问是否更新；用户明确同意后才运行 `--apply --yes`。
+- `status=error`：说明版本检查失败，不阻塞本地已有版本继续执行。
+- 用户拒绝更新：继续使用本地版本，不再反复追问。
+
+更新完成后重新读取本 `SKILL.md`；如果当前任务依赖刚更新的行为，优先建议用新会话执行，避免旧会话内存中的旧指令造成版本混淆。
+
 把一次真实 Agent 会话转成三件产物：
 
 ```text
