@@ -5,6 +5,22 @@ description: 设计、生成并验收 DeepWorks AI 同事工作区中的单专�
 
 # DeepWorks 专家/专家团构建
 
+## 零、版本检查
+
+执行任何生成或修改动作前，先运行：
+
+```bash
+SKILL_HOME="${INDUSTRIAL_AGENT_SKILL_HOME:-$HOME/.agents/skills/industrial-agent-builder}"
+python3 "$SKILL_HOME/scripts/check_update.py"
+```
+
+- `status=current`：继续当前任务。
+- `status=update_available`：向用户展示本地 commit、远端 commit，并询问是否更新；用户明确同意后才运行 `--apply --yes`。
+- `status=error`：说明版本检查失败，不阻塞本地已有版本继续执行。
+- 用户拒绝更新：继续使用本地版本，不再反复追问。
+
+更新完成后重新读取本 `SKILL.md`；如果当前任务依赖刚更新的行为，优先建议用新会话执行，避免旧会话内存中的旧指令造成版本混淆。
+
 先确认产品要的是**单专家**还是**专家团**。产品没说清时先问，**不得默认单专家**；产品定了形态，就不要为了延迟或实现方便擅自改掉。
 
 ## 一、先判形态
