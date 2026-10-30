@@ -100,6 +100,22 @@ def rebuild(contexts: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         ]
         if running:
             active[role] = running[-1]
+    stall_after = runtime.member_stall_seconds()
+    now = runtime.utc_now()
+    stalled: Dict[str, Dict[str, Any]] = {}
+    for role, item in active.items():
+        idle = runtime.idle_seconds(
+            item.get("last_comment_at"),
+            item.get("updated_at"),
+            item.get("created_at"),
+            now=now,
+        )
+        if idle is not None and idle >= stall_after:
+            stalled[role] = {
+                "child_id": str(item.get("id") or ""),
+                "status": str(item.get("status") or ""),
+                "idle_seconds": idle,
+            }
     return {
         "root_issue_id": root,
         "request": request,
@@ -108,5 +124,7 @@ def rebuild(contexts: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         "active": active,
         "failed": failed,
         "dispatched_roles": set(by_role),
+        "stalled": stalled,
+        "stall_seconds": stall_after,
         "recovery_error": recovery_error,
     }

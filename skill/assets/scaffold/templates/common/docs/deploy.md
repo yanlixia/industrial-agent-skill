@@ -30,11 +30,13 @@
 ```bash
 python3 scripts/doctor.py
 python3 scripts/doctor.py --release
+python3 scripts/doctor.py --agents-json agents.json --runtimes-json runtimes.json --squad-json squad.json \
+  --agent-details-json agent-details.json   # /api/agents/{id} 导出，补齐列表缺失的 squad-only Agent
 python3 -m unittest discover -s tests -v
 python3 scripts/check_marker_contract.py .
 ```
 
-`doctor.py` 会把每个 Skill 单独复制到临时目录运行，模拟线上只挂载 Skill 的布局；`--release` 还会检查真实 Agent/squad ID。全绿后再发布，不能只因为“文件上传成功”就宣布可用。
+`doctor.py` 会把每个 Skill 单独复制到临时目录运行，模拟线上只挂载 Skill 的布局；`--release` 还会检查真实 Agent/squad ID。三份控制面快照门禁还会校验成员是否在当前 squad、runtime 是否 online `managed_sandbox`、Skill 是否绑定到成员 Agent，以及团长派发 env 是否指向同一组成员。全绿后再发布，不能只因为“文件上传成功”就宣布可用。
 
 ## 4. DeepWorks test
 
@@ -50,10 +52,19 @@ python3 scripts/check_marker_contract.py .
 
 - 团长 instructions
 - 成员 instructions
-- 每个 Skill 版本
+- 每个 Skill 版本（沙箱只注入已发布版本，草稿改动不会生效）
 - squad 绑定
-- runtime 绑定
+- runtime 绑定（成员必须是 online 的 managed_sandbox）
 - 团长 Skill 内的 `config/team.json`
 - `deepworks.manifest.json`
 
 只发布 Skill、不更新 Agent/squad/runtime，不算完成。
+
+## 6. 运行时开关（专家团）
+
+- `TEAM_MEMBER_STALL_SECONDS`：active child 多久没有活动判定为停滞，默认 180 秒；超过后返回 `member_runtime_stalled`，保留调度卡，不自动重派。
+- `TEAM_INLINE_WAIT`：设为 `1` 时派发后在脚本内切片等待，用户只收到最终回复；默认关闭（先回进度，靠平台续跑）。
+- `TEAM_SLICE_SECONDS` / `TEAM_POLL_SECONDS`：单次切片与片内轮询间隔，默认 25 秒 / 2 秒。
+- `TEAM_MAX_STEPS`：一轮内最多连续派发的成员数，默认 10。
+- 成员 task 数秒内没被 claim 先查绑定：`runtime_id` 在任务创建时写死，改绑 Agent 不会迁移存量任务；沙箱 worker 约每 2 秒扫一次队列。
+- Skill 改动必须发布新版本；沙箱注入的是已发布版本，草稿不会生效。

@@ -19,7 +19,9 @@ description: 设计、生成并验收 DeepWorks AI 同事工作区中的单专�
 - **真实成员**：默认。每个成员是独立 Agent，有 instructions、soul、Skill 和角色边界。
 - **确定性内联**：可选加速。只有产品允许“专家只是能力投影”时才用。生成器默认生成真实成员；内联需要明确改造并做 test 环境验证。
 
-详细判断读 `references/decision-gates.md`。
+**硬门禁**：如果产品要求“原生专家调度卡 / 独立成员执行明细 / 真实成员 Task”，内联不可用，必须选真实成员。无 assignee 的投影 child 不会产生平台成员调度卡。
+
+详细判断读 `references/decision-gates.md`；沙箱怎么领任务、为什么排队、`/workspace` 里有什么，读 `references/sandbox-runtime.md`。
 
 ## 二、生成骨架
 
@@ -72,6 +74,9 @@ ID 还不知道时可以省略；生成后在 `skills/<domain>-orchestrate/confi
 - 子进程错误必须能被父进程读到真实 message。
 - 不依赖跨轮 `/tmp`；Skill 载荷优先控制在 15 个文件 / 200KB 内。
 - Skill 目录必须自包含，不能依赖仓库根目录的 `scripts/`。
+- 沙箱注入的是 Skill 的**已发布版本**；草稿改动不上线。改完必须发布版本，再开新会话。
+- 需要外呼的 Skill 必须确认沙箱 `network.mode` 与 `allowed_domains`；`disabled` 下外呼失败会伪装成业务超时。
+- 专家团发布前必须校验每个成员属于当前 squad，runtime 为 `managed_sandbox` 且 online，成员 Skill 已绑定到成员 Agent，且团长派发环境中的成员 ID 与 squad 当前绑定一致；任一不满足必须阻止发布。
 
 ## 五、专家团额外规则
 
@@ -83,6 +88,10 @@ ID 还不知道时可以省略；生成后在 `skills/<domain>-orchestrate/confi
 - 成员必须从 child issue 的输入 JSON 取业务载荷，不能把 child 标题当用户请求。
 - 平台 Squad Operating Protocol 仍有效；不要用提示词静默对抗平台协议。确需内联时，先记录产品决策并做真实 test 会话验证。
 - 发布必须同批更新：团长 instructions、成员 instructions、各 Skill、squad 绑定、runtime 绑定。
+- 成员 Agent ID 只读当前 squad 的配置或部署环境；禁止在派发脚本里保留历史 UUID 兜底，缺失或不一致时必须 fail-closed。
+- 成员 task 长期 QUEUED 时，先按 `references/sandbox-runtime.md` 的 claim 判定链分流（runtime 绑定、串行化、`SandboxRun`、策略）；不得静默无限轮询，也不得通过改成无 assignee 投影来绕过。
+- 生成的团长骨架自带成员看门狗：active child 超过 `TEAM_MEMBER_STALL_SECONDS`（默认 180）无活动时返回 `member_runtime_stalled`，保留调度卡，不自动重派；阈值可按产品 SLA 调整。
+- 成员 Agent 的 Task 在创建时就把 `runtime_id` 写死，改绑 Agent 不会迁移存量 Task；排障时先确认 Task 自己的绑定，不要只看 Agent 当前配置。
 
 ## 六、验收
 
@@ -92,17 +101,22 @@ ID 还不知道时可以省略；生成后在 `skills/<domain>-orchestrate/confi
 python3 -m unittest discover -s tests -v
 python3 scripts/doctor.py
 python3 scripts/doctor.py --release   # 真实 ID 已填写
+python3 scripts/doctor.py --agents-json agents.json --runtimes-json runtimes.json --squad-json squad.json \
+  --agent-details-json agent-details.json
 ```
 
 DeepWorks test：
 
 - 新建会话，不复用旧 session。
+- 抓 `/api/issues/{id}/task-runs`，跑 `python3 "$SKILL_HOME/tools/task_timeline.py" task-runs.json`：claim 超过 10 秒或一直 `queued` 会直接给出归因提示。
+- 要宣称 P95 达标，先用 `tools/perf_sampler.py` 采够 20 个新会话样本：`--round query:... --round selection:... --probe-cmd '<你的探针命令>'`，它逐轮落盘原始 JSON 并在 `summary.json` 给出 `insufficient_samples` / `round_failures` / `p95_slow`。
 - 只挂载 Skill 目录做一次 smoke，确认没有仓库根目录依赖。
 - 核对完整事件时间线、最终用户消息、marker、dispatch/artifact/外部 API 次数。
+- 核对原生专家调度卡与 `/api/issues/{id}/task-runs` 中的真实成员 Task；child 必须带 assignee。
 - 单专家首响 P95 ≤120s；专家团首响 P95 ≤120s，完整链按产品 SLA（默认 ≤180s）。
 - 缺 timings、marker 为空、重复副作用任一项出现，都不得宣布完成。
 
-完整清单见 `references/checklist.md`。
+运行时机制见 `references/sandbox-runtime.md`；完整清单见 `references/checklist.md`。
 
 ## 七、性能反馈闭环
 

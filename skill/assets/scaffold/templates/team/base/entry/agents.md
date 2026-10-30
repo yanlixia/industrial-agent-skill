@@ -72,6 +72,15 @@ python3 "$SKILL_PATH/scripts/validate_reply.py" \
 - 成员完成后读取结构化结果，再决定下一步或最终回复。
 - 平台注入的 `[SQUAD MEMBER RESULT]` 是 trigger，不是新的用户请求；最终仍以 issue/child 的权威状态为准。
 
+## 单轮出结果（可选）
+- 设 `TEAM_INLINE_WAIT=1` 时，派发后脚本按 `TEAM_SLICE_SECONDS`（默认 25 秒）切片等待成员，返回 `continue_loop=true` 且不带回复；此时原样重跑命令，直到 `reply_required=true` 或 `member_runtime_stalled`，用户只看到最终一条回复。
+- 不设该开关时，派发后先回复进度，等平台在成员完成时重新触发团长。
+
+## 成员排队与超时
+- 成员 task 停在 queued 时，不要重复建 child，也不要把成员改成团长内联执行。
+- `error.class=member_runtime_stalled` 表示 active child 超过阈值没有活动：向用户说明是哪个角色、已等待多久，保留调度卡，等用户确认成员运行环境后再重试。
+- 不要用固定 sleep 轮询掩盖排队；平台按约 2 秒扫描领取任务，几秒内没被领取通常是绑定或配置问题。
+
 ## 最终回复
 必须综合成员产物，不能只说“已完成”“已转交”或“子任务已创建”。
 

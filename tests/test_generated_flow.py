@@ -13,6 +13,7 @@ FAKE_CLI = r'''#!/usr/bin/env python3
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 db_path = Path(os.environ["FAKE_DEEPEI_DB"])
@@ -35,9 +36,26 @@ def done(payload):
 
 if args[:2] == ["issue", "list"]:
     parent = value("--parent")
+    if os.environ.get("FAKE_AUTO_COMPLETE") == "1":
+        for child in db["children"]:
+            if child.get("parent_issue_id") != parent or child.get("status") != "todo":
+                continue
+            child["status"] = "done"
+            child["artifact"] = json.dumps(
+                {
+                    "ok": True,
+                    "role": child.get("role", ""),
+                    "result": {"summary": child.get("role", "") + " 已完成", "facts": {}},
+                    "member_result_key": "key-" + child.get("role", ""),
+                },
+                ensure_ascii=False,
+            )
+        save()
     done({"issues": [child for child in db["children"] if child["parent_issue_id"] == parent]})
 
 if args[:2] == ["issue", "create"]:
+    if os.environ.get("FAKE_CREATE_WITHOUT_ID") == "1":
+        done({"ok": True})
     child = {
         "id": "child-%d" % (len(db["children"]) + 1),
         "parent_issue_id": value("--parent"),
@@ -45,6 +63,8 @@ if args[:2] == ["issue", "create"]:
         "description": value("--description"),
         "status": "todo",
         "assignee_id": value("--assignee-id"),
+        "role": value("--title").split("]")[0].lstrip("["),
+        "created_at": os.environ.get("FAKE_CHILD_CREATED_AT") or datetime.now(timezone.utc).isoformat(),
     }
     db["children"].append(child)
     save()
@@ -134,9 +154,13 @@ class GeneratedTeamFlowTests(unittest.TestCase):
             self.assertEqual(first["reply_intent"]["kind"], "progress")
             state = json.loads(db_path.read_text(encoding="utf-8"))
             self.assertEqual([child["assignee_id"] for child in state["children"]], ["diag-id"])
+            child_id = str(state["children"][0]["id"])
+            self.assertEqual(first["dispatch_issue_id"], child_id)
+            self.assertEqual(first["dispatch_role"], "diagnosis")
 
             waiting = run_turn("wait-diagnosis")
             self.assertEqual(waiting["reply_intent"]["kind"], "progress")
+            self.assertEqual(waiting["dispatch_issue_id"], child_id)
             self.assertEqual(len(json.loads(db_path.read_text(encoding="utf-8"))["children"]), 1)
 
             for role, current_agent_id, next_agent_id in [
@@ -167,6 +191,193 @@ class GeneratedTeamFlowTests(unittest.TestCase):
                     self.assertEqual(payload["reply_intent"]["kind"], "progress")
                     self.assertEqual(len(current["children"]), len(state["children"]) + 1)
                     self.assertEqual(current["children"][-1]["assignee_id"], next_agent_id)
+
+    def test_inline_wait_completes_chain_in_one_turn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "team"
+            subprocess.run(
+                [
+                    sys.executable, str(SCAFFOLD), "--mode", "team",
+                    "--domain", "energy", "--title", "能源专家团",
+                    "--roles", "diagnosis,maintenance,monitor",
+                    "--leader-agent-id", "leader-id",
+                    "--agent-ids", "diagnosis=diag-id,maintenance=fix-id,monitor=watch-id",
+                    "--squad-id", "squad-id", "--target", str(target),
+                ],
+                text=True, capture_output=True, check=True,
+            )
+            fake_cli = Path(tmp) / "deepexi"
+            fake_cli.write_text(FAKE_CLI, encoding="utf-8")
+            fake_cli.chmod(0o755)
+            db_path = Path(tmp) / "db.json"
+            db_path.write_text(json.dumps({"children": [], "activity": []}), encoding="utf-8")
+
+            root_id = "11111111-1111-4111-8111-111111111111"
+            task_path = Path(tmp) / "task.json"
+            task_path.write_text(json.dumps({
+                "id": "task-1",
+                "source_type": "issue",
+                "source_ref": root_id,
+                "input": "处理设备故障",
+            }, ensure_ascii=False), encoding="utf-8")
+            output = Path(tmp) / "turn.json"
+
+            env = dict(os.environ)
+            env.pop("DRY_RUN", None)
+            env.pop("INDUSTRIAL_AGENT_OFFLINE", None)
+            env["DEEPEXI_BIN"] = str(fake_cli)
+            env["FAKE_DEEPEI_DB"] = str(db_path)
+            env["FAKE_AUTO_COMPLETE"] = "1"
+            env["TEAM_INLINE_WAIT"] = "1"
+            env["TEAM_SLICE_SECONDS"] = "3"
+            env["TEAM_POLL_SECONDS"] = "0.05"
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(target / "skills" / "energy-orchestrate" / "scripts" / "turn.py"),
+                    "--context", str(task_path),
+                    "--output", str(output),
+                ],
+                cwd=target,
+                text=True,
+                capture_output=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr + completed.stdout)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(payload["reply_intent"]["kind"], "final", payload)
+            self.assertIn("diagnosis 已完成", payload["reply_intent"]["tone_context"]["draft"])
+
+            state = json.loads(db_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                [child["assignee_id"] for child in state["children"]],
+                ["diag-id", "fix-id", "watch-id"],
+            )
+            self.assertEqual(state["root_status"], "in_review")
+
+
+    def test_inline_wait_reports_stalled_member_without_redispatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "team"
+            subprocess.run(
+                [
+                    sys.executable, str(SCAFFOLD), "--mode", "team",
+                    "--domain", "energy", "--title", "能源专家团",
+                    "--roles", "diagnosis,maintenance,monitor",
+                    "--leader-agent-id", "leader-id",
+                    "--agent-ids", "diagnosis=diag-id,maintenance=fix-id,monitor=watch-id",
+                    "--squad-id", "squad-id", "--target", str(target),
+                ],
+                text=True, capture_output=True, check=True,
+            )
+            fake_cli = Path(tmp) / "deepexi"
+            fake_cli.write_text(FAKE_CLI, encoding="utf-8")
+            fake_cli.chmod(0o755)
+            db_path = Path(tmp) / "db.json"
+            db_path.write_text(json.dumps({"children": [], "activity": []}), encoding="utf-8")
+
+            task_path = Path(tmp) / "task.json"
+            task_path.write_text(json.dumps({
+                "id": "task-1",
+                "source_type": "issue",
+                "source_ref": "11111111-1111-4111-8111-111111111111",
+                "input": "处理设备故障",
+            }, ensure_ascii=False), encoding="utf-8")
+            output = Path(tmp) / "turn.json"
+
+            env = dict(os.environ)
+            env.pop("DRY_RUN", None)
+            env.pop("INDUSTRIAL_AGENT_OFFLINE", None)
+            env["DEEPEXI_BIN"] = str(fake_cli)
+            env["FAKE_DEEPEI_DB"] = str(db_path)
+            env["FAKE_CHILD_CREATED_AT"] = "2020-01-01T00:00:00Z"
+            env["TEAM_INLINE_WAIT"] = "1"
+            env["TEAM_MEMBER_STALL_SECONDS"] = "1"
+            env["TEAM_SLICE_SECONDS"] = "1"
+            env["TEAM_POLL_SECONDS"] = "0.05"
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(target / "skills" / "energy-orchestrate" / "scripts" / "turn.py"),
+                    "--context", str(task_path),
+                    "--output", str(output),
+                ],
+                cwd=target,
+                text=True,
+                capture_output=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr + completed.stdout)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertFalse(payload["ok"], payload)
+            self.assertEqual(payload["error"]["class"], "member_runtime_stalled")
+            self.assertEqual(payload["reply_intent"]["kind"], "error")
+
+            state = json.loads(db_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(state["children"]), 1)
+            self.assertEqual(state["children"][0]["assignee_id"], "diag-id")
+
+
+    def test_member_dispatch_without_child_id_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "team"
+            subprocess.run(
+                [
+                    sys.executable, str(SCAFFOLD), "--mode", "team",
+                    "--domain", "energy", "--title", "能源专家团",
+                    "--roles", "diagnosis,maintenance,monitor",
+                    "--leader-agent-id", "leader-id",
+                    "--agent-ids", "diagnosis=diag-id,maintenance=fix-id,monitor=watch-id",
+                    "--squad-id", "squad-id", "--target", str(target),
+                ],
+                text=True, capture_output=True, check=True,
+            )
+            fake_cli = Path(tmp) / "deepexi"
+            fake_cli.write_text(FAKE_CLI, encoding="utf-8")
+            fake_cli.chmod(0o755)
+            db_path = Path(tmp) / "db.json"
+            db_path.write_text(json.dumps({"children": [], "activity": []}), encoding="utf-8")
+            root_id = "11111111-1111-4111-8111-111111111111"
+            task_path = Path(tmp) / "task.json"
+            task_path.write_text(
+                json.dumps(
+                    {"id": "task-1", "source_type": "issue", "source_ref": root_id, "input": "处理设备故障"},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            output = Path(tmp) / "turn.json"
+            env = dict(os.environ)
+            env.pop("DRY_RUN", None)
+            env.pop("INDUSTRIAL_AGENT_OFFLINE", None)
+            env["DEEPEXI_BIN"] = str(fake_cli)
+            env["FAKE_DEEPEI_DB"] = str(db_path)
+            env["FAKE_CREATE_WITHOUT_ID"] = "1"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(target / "skills" / "energy-orchestrate" / "scripts" / "turn.py"),
+                    "--context", str(task_path),
+                    "--output", str(output),
+                ],
+                cwd=target,
+                text=True,
+                capture_output=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr + completed.stdout)
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertFalse(payload["ok"], payload)
+            self.assertEqual(payload["error"]["class"], "dispatch_identity_missing")
+            self.assertEqual(payload["reply_intent"]["kind"], "error")
+            self.assertNotIn("dispatch_issue_id", payload)
+            draft = payload["reply_intent"]["tone_context"]["draft"]
+            self.assertNotIn("已受理", draft)
 
 
 if __name__ == "__main__":

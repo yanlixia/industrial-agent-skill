@@ -210,6 +210,56 @@ CLI 路径解析顺序：
 
 只发布其中一层，不算完成。
 
+### 成员 runtime 与 Skill 绑定（发布硬门禁）
+
+每个成员 Agent 必须属于 **当前 squad**，并绑定 **online 的 managed_sandbox runtime**，不能绑定离线的本地 exec-host。发布前抓取 `/api/squads/{id}`、`/api/agents` 与 `/api/runtimes`，逐成员校验：
+
+1. Agent 在 `/api/agents` 可见、不是 draft，且是当前 squad 成员；
+2. Agent 的 `runtime_id` 在 `/api/runtimes` 存在，`status=online`、`runtime_mode=managed_sandbox`；
+3. 成员所需的 Skill 已绑定到该成员 Agent（不是只绑定团长）；
+4. 团长 custom_env 的成员 Agent ID 与当前 squad 绑定完全一致；禁止脚本内置历史 Agent UUID 兜底。
+
+生成物可运行：
+
+```bash
+python3 scripts/doctor.py --agents-json agents.json --runtimes-json runtimes.json --squad-json squad.json
+```
+
+任一不满足必须阻止发布。成员 child 创建成功、页面出现调度卡，只证明派发链路成立；卡在 queued 时还要看成员 runtime 是否有 worker 领取。
+
+### 运行环境排障：成员 Task 为什么一直 QUEUED
+
+机制全貌（claim 十道门、`SandboxRun` 锁、issue 串行化、`/workspace` 布局）见 `references/sandbox-runtime.md`。
+
+`status=online` 只说明 runtime 心跳存在，不等于成员 task 一定被领取。按下面顺序取证：
+
+| 判据 | 怎么查 | 结论 |
+|---|---|---|
+| runtime 离线/暂停 | `/api/runtimes` 的 `status` 不是 `online` | 运维问题；修复/重绑 runtime |
+| runtime 类型不对 | `runtime_mode` 不是 `managed_sandbox` | 本地 exec-host 不应承载原生成员 task |
+| 无空闲槽 | `current_running_tasks >= max_concurrency` | 容量排队，等待或扩容 |
+| 候选静默跳过 | agent version 缺失、安全策略不满足 | 配置缺陷，平台 claim 会直接 `continue` |
+| 终态 run 留活绑定 | 同 runtime 新 task 秒 claim，老 task 仍 queued | 平台缺陷，取消重发 |
+| 退避窗口 | `dispatch_not_before` 在未来 | 秒级等待 |
+| issue 串行化 | 同 issue 已有未终态 task | 设计内，等前序 task |
+
+关键对照实验：**在同一 runtime 发一条新消息**。新 task 秒 claim、老 task 仍不动，说明 runtime 健康而老 task 被自身状态锁死；新 task 也排队，才是容量/调度问题。
+
+平台源码定位（`deepexi-agent-teams`）：
+
+- claim 活路径：`backend/agent-teams-common/src/agent_teams_common/runtime/sandbox/claim_service.py`（由 `daemon/claims.py` 调用）。
+- 重复副本：`backend/deepexi-agent-teams-backend-sandbox-worker/.../runtime/sandbox/claim_service.py`，改平台时必须同步两份并注明活路径。
+- runtime liveness：`backend/deepexi-agent-teams-backend-control-plane/.../runtime/liveness.py`。
+- 成员 Task 卡：前端 `ExecutionLogSection` 读 `/api/issues/{id}/task-runs`；只有真实成员 Task 才有卡片，Skill 内联不会生成。
+
+团长骨架已内置看门狗：`state.rebuild` 读取 child 的 `created_at` / `updated_at` / 最近评论时间，active child 空闲超过 `TEAM_MEMBER_STALL_SECONDS`（默认 180 秒）时 `plan` 返回 `member_stalled`，`turn.py` 输出 `member_runtime_stalled` 并保留调度卡；不会自动重派。
+
+时间线至少记录 API 字段 `dispatched_at → started_at → completed_at`（DB 侧 `claimed_at` / `finished_at`）。如果只有 `dispatched_at` 而长时间没有 `started_at`，先查 runtime，不要先怪业务代码或模型。
+
+三条实测坑：事件流里的 `member:sandbox_creating` 等阶段事件 `created_at` 会批量等于 claim 时刻，不能用来算冷启动；`GET /api/tasks/{id}` 可能在 `completed_at` 写入后仍返回 `running`，判定卡死前要重读；平台时间是无时区本地时间，按 UTC 解析会让 `never_claimed` 永不触发。
+
+把抓到的 `/task-runs` JSON 直接交给 `tools/task_timeline.py`，它会算出三段耗时并标注 `claim_slow` / `never_claimed` / `start_stalled`。正式发布用多会话样本跑 P95：`python3 tools/task_timeline.py sessions/*.json --strict --min-samples 20 --total-budget 180`。
+
 ## 六、test 验收
 
 必须新建会话，记录：
@@ -222,6 +272,7 @@ CLI 路径解析顺序：
 - marker 是否非空
 - 最终用户可见消息
 - 错误分类和 failure code
+- 原生专家调度卡与 `/api/issues/{id}/task-runs` 中的真实成员 Task；child 是否带 assignee
 
 通过标准：
 
@@ -230,6 +281,7 @@ CLI 路径解析顺序：
 - 重复事件、重复确认、并发派发不产生重复副作用。
 - marker 丢失可静默恢复。
 - 没有空回复、裸错误、内部路径/UUID 泄漏。
+- 成员 runtime 均为 online managed_sandbox；成员 task 无进展超过阈值时返回结构化 `member_runtime_stalled`，而不是静默无限等待。
 
 ## 七、常见平台坑
 
@@ -240,5 +292,7 @@ CLI 路径解析顺序：
 - runtime 长期 QUEUED 不一定是容量问题；先检查是否被旧 sandbox run 锁死。
 - Skill 依赖仓库根目录脚本，线上只挂载 Skill 目录时直接 `ModuleNotFoundError`。
 - 成员把 child 标题当业务请求，真实输入 JSON 没被消费。
+- 在 Skill 草稿里改脚本就重测：沙箱只注入已发布版本，测的还是旧内容。
+- Agent 改绑了新 runtime，但存量 Task 的 `runtime_id` 没变，仍然排到旧 runtime 上。
 - 只改仓库里的 manifest，却没改 Skill 内的 `config/team.json`，线上找不到成员 Agent ID。
 - test 环境通过不等于生产可用；发布后仍要用新会话复验。

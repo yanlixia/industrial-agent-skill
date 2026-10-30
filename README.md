@@ -95,7 +95,15 @@ python3 -m unittest discover -s tests -v      # 生成物验收
 
 生成物门禁里的 `doctor.py` 会把入口 Skill 单独复制到临时目录再执行，专门检查线上“只挂载 Skill 目录”的布局。
 
-正式发布还必须在 test 环境记录：事件时间线、dispatch/artifact/API 次数、最终用户消息、每轮 `timings` 和 P95。
+专家团发布前还必须抓取 Test 控制面的 `/api/agents` 与 `/api/runtimes`，跑成员 runtime/Skill 绑定门禁：
+
+```bash
+python3 scripts/doctor.py --agents-json agents.json --runtimes-json runtimes.json --squad-json squad.json
+```
+
+要求四个成员都在当前 squad，runtime 均为 `managed_sandbox` + `online`，各成员 Skill 已绑定到对应成员 Agent，且团长派发 env 与 squad 当前 Agent ID 一致；任一不满足即失败。
+
+正式发布还必须在 test 环境记录：事件时间线、原生专家调度卡/`task-runs`、dispatch/artifact/API 次数、最终用户消息、每轮 `timings` 和 P95。
 
 ## 性能反馈闭环
 
@@ -119,7 +127,7 @@ python3 ~/.agents/skills/session-storyboard/scripts/feedback_issue.py \
 
 ```text
 skill/SKILL.md                  # Skill 入口：判形态 -> 生成 -> 实现 -> 验收
-skill/references/               # 决策、架构、DeepWorks、文件契约、清单
+skill/references/               # 决策、架构、DeepWorks、沙箱运行时、文件契约、清单
 skill/assets/scaffold/templates # single / team / common 模板
 session-storyboard/             # 会话性能分析与反馈闭环 Skill
 tools/scaffold.py               # 单专家/专家团生成器
@@ -128,6 +136,8 @@ tools/validate_reply.py         # 回复验收门
 tools/check_marker_contract.py  # marker 一致性 lint
 tools/state_roundtrip.py        # 状态往返契约 harness
 tools/remote_probe.py           # test 环境回放探针
+tools/task_timeline.py          # 用 /task-runs JSON 审计 claim/启动/执行耗时
+tools/perf_sampler.py           # 批量新会话采集多轮延迟样本，产出 P95 证据
 docs/PITFALLS.md                # 已实证坑与规避
 tests/                          # 本 Skill 的生成物验收
 ```

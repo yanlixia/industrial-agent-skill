@@ -76,7 +76,7 @@ fi
 if [ "${SKIP_TOOLS_PATH:-0}" != "1" ]; then
   say "installing CLI tools to ${BIN_DIR}"
   mkdir -p "${BIN_DIR}"
-  for tool in check_marker_contract.py validate_reply.py state_roundtrip.py remote_probe.py; do
+  for tool in check_marker_contract.py validate_reply.py state_roundtrip.py remote_probe.py task_timeline.py; do
     install -m 0755 "${REPO_DIR}/tools/${tool}" "${BIN_DIR}/${tool%.py}" 2>/dev/null || \
       cp "${REPO_DIR}/tools/${tool}" "${BIN_DIR}/${tool}"
   done
@@ -95,6 +95,6 @@ say "self-tests passed"
 say "done. usage:"
 echo "  - in your agent CLI: mention '工业智能体' / 'industrial agent' — the skill triggers"
 echo "  - session replay: mention '会话回放' / '分析为什么这轮慢' — session-storyboard triggers"
-echo "  - tools now on PATH (after reload): check_marker_contract  validate_reply  state_roundtrip  remote_probe"
+echo "  - tools now on PATH (after reload): check_marker_contract  validate_reply  state_roundtrip  remote_probe  task_timeline"
 echo "  - scaffold a single expert: python3 ${TARGET}/tools/scaffold.py --mode single --domain <domain> --title '<title>' --target ./my-expert"
 echo "  - scaffold an expert team:  python3 ${TARGET}/tools/scaffold.py --mode team --domain <domain> --title '<title>' --roles role1,role2 --target ./my-team"

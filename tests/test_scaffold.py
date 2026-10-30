@@ -210,6 +210,149 @@ class ScaffoldAcceptanceTests(unittest.TestCase):
             self.assertNotEqual(release.returncode, 0)
             self.assertIn("does not match", release.stdout)
 
+    def test_runtime_snapshot_gate_requires_online_managed_members(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "team"
+            self.generate(
+                "--mode", "team", "--domain", "energy", "--title", "能源专家团",
+                "--roles", "diagnosis,maintenance,monitor",
+                "--leader-agent-id", "leader-id",
+                "--agent-ids", "diagnosis=diag-id,maintenance=fix-id,monitor=watch-id",
+                "--squad-id", "squad-id", "--target", str(target),
+            )
+            agents = [
+                {
+                    "id": "leader-id", "runtime_id": "r-leader", "runtime_mode": "managed_sandbox",
+                    "skills": [{"name": "energy-orchestrate"}],
+                    "custom_env": {
+                        "DEEPWORKS_AGENT_ID_DIAGNOSIS": "diag-id",
+                        "DEEPWORKS_AGENT_ID_MAINTENANCE": "fix-id",
+                        "DEEPWORKS_AGENT_ID_MONITOR": "watch-id",
+                    },
+                },
+                {"id": "diag-id", "runtime_id": "r-diag", "runtime_mode": "managed_sandbox", "skills": [{"name": "diagnosis"}]},
+                {"id": "fix-id", "runtime_id": "r-fix", "runtime_mode": "managed_sandbox", "skills": [{"name": "maintenance"}]},
+                {"id": "watch-id", "runtime_id": "r-watch", "runtime_mode": "managed_sandbox", "skills": [{"name": "monitor"}]},
+            ]
+            runtimes = [
+                {"id": "r-leader", "status": "online", "runtime_mode": "managed_sandbox"},
+                {"id": "r-diag", "status": "online", "runtime_mode": "managed_sandbox"},
+                {"id": "r-fix", "status": "online", "runtime_mode": "managed_sandbox"},
+                {"id": "r-watch", "status": "online", "runtime_mode": "managed_sandbox"},
+            ]
+            agents_path = Path(tmp) / "agents.json"
+            runtimes_path = Path(tmp) / "runtimes.json"
+            squad_path = Path(tmp) / "squad.json"
+            agents_path.write_text(json.dumps(agents), encoding="utf-8")
+            runtimes_path.write_text(json.dumps(runtimes), encoding="utf-8")
+            squad_path.write_text(json.dumps({
+                "id": "squad-id",
+                "leader_agent_id": "leader-id",
+                "members": [
+                    {"member_type": "agent", "member_id": agent_id}
+                    for agent_id in ("leader-id", "diag-id", "fix-id", "watch-id")
+                ],
+            }), encoding="utf-8")
+            healthy = subprocess.run(
+                [
+                    sys.executable, "scripts/doctor.py",
+                    "--agents-json", str(agents_path),
+                    "--runtimes-json", str(runtimes_path),
+                    "--squad-json", str(squad_path),
+                ],
+                cwd=target, text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(healthy.returncode, 0, healthy.stdout + healthy.stderr)
+
+            runtimes[1]["config"] = {
+                "network": {"mode": "disabled"},
+                "lifecycle": {"mode": "session"},
+                "volume": {"mode": "task_volume"},
+            }
+            runtimes_path.write_text(json.dumps(runtimes), encoding="utf-8")
+            warned = subprocess.run(
+                [
+                    sys.executable, "scripts/doctor.py",
+                    "--agents-json", str(agents_path),
+                    "--runtimes-json", str(runtimes_path),
+                    "--squad-json", str(squad_path),
+                ],
+                cwd=target, text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(warned.returncode, 0, warned.stdout + warned.stderr)
+            self.assertIn("network.mode=disabled", warned.stdout)
+            self.assertIn("volume.mode=task_volume", warned.stdout)
+
+            runtimes[1]["config"]["lifecycle"]["idle_ttl_seconds"] = 5
+            runtimes_path.write_text(json.dumps(runtimes), encoding="utf-8")
+            bad_ttl = subprocess.run(
+                [
+                    sys.executable, "scripts/doctor.py",
+                    "--agents-json", str(agents_path),
+                    "--runtimes-json", str(runtimes_path),
+                    "--squad-json", str(squad_path),
+                ],
+                cwd=target, text=True, capture_output=True, check=False,
+            )
+            self.assertNotEqual(bad_ttl.returncode, 0)
+            self.assertIn("out of platform range", bad_ttl.stdout)
+            runtimes[1]["config"] = {}
+
+            runtimes[1]["status"] = "offline"
+            runtimes_path.write_text(json.dumps(runtimes), encoding="utf-8")
+            offline = subprocess.run(
+                [
+                    sys.executable, "scripts/doctor.py",
+                    "--agents-json", str(agents_path),
+                    "--runtimes-json", str(runtimes_path),
+                    "--squad-json", str(squad_path),
+                ],
+                cwd=target, text=True, capture_output=True, check=False,
+            )
+            self.assertNotEqual(offline.returncode, 0)
+            self.assertIn("not online", offline.stdout)
+
+            runtimes[1]["status"] = "online"
+            runtimes_path.write_text(json.dumps(runtimes), encoding="utf-8")
+            agents[0]["custom_env"]["DEEPWORKS_AGENT_ID_DIAGNOSIS"] = "stale-id"
+            agents_path.write_text(json.dumps(agents), encoding="utf-8")
+            stale = subprocess.run(
+                [
+                    sys.executable, "scripts/doctor.py",
+                    "--agents-json", str(agents_path),
+                    "--runtimes-json", str(runtimes_path),
+                    "--squad-json", str(squad_path),
+                ],
+                cwd=target, text=True, capture_output=True, check=False,
+            )
+            self.assertNotEqual(stale.returncode, 0)
+            self.assertIn("does not match current squad agentId", stale.stdout)
+
+    def test_doctor_rejects_hardcoded_agent_uuid_in_dispatch_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "team"
+            self.generate(
+                "--mode", "team", "--domain", "energy", "--title", "能源专家团",
+                "--roles", "diagnosis,maintenance",
+                "--leader-agent-id", "leader-id",
+                "--agent-ids", "diagnosis=diag-id,maintenance=fix-id",
+                "--squad-id", "squad-id", "--target", str(target),
+            )
+            dispatch = target / "skills" / "energy-orchestrate" / "scripts" / "dispatch.py"
+            dispatch.write_text(
+                dispatch.read_text(encoding="utf-8")
+                + '\nDEFAULT_DIAGNOSIS_AGENT_ID = "417a46df-6ea3-4804-ae06-58a137b380ae"\n',
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [sys.executable, "scripts/doctor.py"],
+                cwd=target, text=True, capture_output=True, check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("hardcoded UUID", result.stdout)
+            self.assertIn("DEEPWORKS_AGENT_ID_", result.stdout)
+
+
 
 if __name__ == "__main__":
     unittest.main()

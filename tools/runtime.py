@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -22,6 +23,46 @@ ROOT_MARKERS = (
 DONE_STATUSES = {"done", "completed", "in_review"}
 FAILED_STATUSES = {"failed", "cancelled"}
 ACTIVE_STATUSES = {"todo", "in_progress", "running", "queued", "blocked", "waiting"}
+DEFAULT_MEMBER_STALL_SECONDS = 180.0
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def parse_timestamp(value: Any) -> Optional[datetime]:
+    """Parse a platform ISO8601 timestamp; return None instead of guessing."""
+    if not value or not isinstance(value, str):
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def idle_seconds(*values: Any, now: Optional[datetime] = None) -> Optional[float]:
+    """Seconds since the newest of the supplied timestamps."""
+    moments = [moment for moment in (parse_timestamp(value) for value in values) if moment is not None]
+    if not moments:
+        return None
+    reference = now or utc_now()
+    return round((reference - max(moments)).total_seconds(), 3)
+
+
+def member_stall_seconds() -> float:
+    raw = os.environ.get("TEAM_MEMBER_STALL_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_MEMBER_STALL_SECONDS
+    try:
+        return max(float(raw), 1.0)
+    except ValueError:
+        return DEFAULT_MEMBER_STALL_SECONDS
 USER_INPUT_KEYS = (
     "input",
     "user_input",
@@ -370,6 +411,8 @@ def collect_team_children(root_id: str, deepexi_bin: str = "") -> List[Dict[str,
             "status": str(issue.get("status") or "").lower(),
             "title": str(issue.get("title") or ""),
             "idempotency_key": marker_value(str(issue.get("description") or ""), "role_dispatch_key"),
+            "created_at": issue.get("created_at"),
+            "updated_at": issue.get("updated_at"),
         }
         input_payload = _json_object_from_text(str(issue.get("description") or ""))
         if isinstance(input_payload, dict):
@@ -385,6 +428,13 @@ def collect_team_children(root_id: str, deepexi_bin: str = "") -> List[Dict[str,
                 extract_member_result(_artifact_result_text(binary, issue_id), role),
                 role,
             )
+            latest_comment_at = ""
+            for comment in payload_items(comments, "comments"):
+                created_at = str(comment.get("created_at") or "")
+                if created_at and created_at > latest_comment_at:
+                    latest_comment_at = created_at
+            if latest_comment_at:
+                item["last_comment_at"] = latest_comment_at
             if parsed is None:
                 for comment in reversed(payload_items(comments, "comments")):
                     if str(comment.get("author_type") or "") != "agent":
@@ -622,6 +672,7 @@ def turn_payload(
     continue_loop: bool = False,
     ok: bool = True,
     error: Optional[Dict[str, Any]] = None,
+    observable: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "ok": ok,
@@ -633,6 +684,11 @@ def turn_payload(
         payload["reply_intent"] = reply_intent
     if error:
         payload["error"] = error
+    # Dispatch identity must survive every continuation result. Losing it is what
+    # turned a healthy "wait for member" into a bogus "dispatch failed" report.
+    for key, value in (observable or {}).items():
+        if value not in (None, "", [], {}):
+            payload[key] = value
     return payload
 
 

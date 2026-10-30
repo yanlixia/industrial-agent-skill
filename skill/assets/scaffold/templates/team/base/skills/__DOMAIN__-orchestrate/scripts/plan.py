@@ -50,8 +50,25 @@ def next_action(state: Dict[str, Any], request: str) -> Dict[str, Any]:
     completed = state.get("completed") or {}
     if ROLES and all(role in completed for role in ROLES):
         return {"action": "final", **_synth(state)}
+    stalled = state.get("stalled") or {}
+    if stalled:
+        role, detail = next(iter(stalled.items()))
+        minutes = max(int(float(detail.get("idle_seconds") or 0) // 60), 1)
+        return {
+            "action": "member_stalled",
+            "role": role,
+            "idle_seconds": detail.get("idle_seconds"),
+            "error_class": "member_runtime_stalled",
+            "text": "%s 已 %d 分钟没有进展，调度卡已保留。请先确认该成员的运行环境在线，再决定是否重试。"
+            % (_role_label(role), minutes),
+        }
     if state.get("active"):
-        return {"action": "wait", "text": "任务已派发，正在等待成员返回结果。"}
+        _role, item = next(iter(state["active"].items()))
+        return {
+            "action": "wait",
+            "dispatch_issue_id": str(item.get("id") or ""),
+            "text": "任务已派发，正在等待成员返回结果。",
+        }
     ready = next((role for role in ROLES if role not in state.get("dispatched_roles", set())), "")
     if not ready:
         return {"action": "wait", "text": "任务已派发，正在等待成员返回结果。"}

@@ -17,7 +17,7 @@ SKILL_ROOT_CANDIDATES = [
     TOOLS.parent / "assets/scaffold/templates",
     TOOLS / "templates",
 ]
-COPY_TOOLS = ["runtime.py", "validate_reply.py", "check_marker_contract.py", "state_roundtrip.py"]
+COPY_TOOLS = ["runtime.py", "validate_reply.py", "check_marker_contract.py", "state_roundtrip.py", "task_timeline.py", "perf_sampler.py"]
 SKILL_TOOLS = ["runtime.py", "validate_reply.py"]
 SCAFFOLD_MARKER = ".industrial-agent-scaffold.json"
 
